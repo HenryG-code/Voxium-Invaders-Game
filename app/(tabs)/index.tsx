@@ -590,7 +590,7 @@ export default function HomeScreen() {
     () => createForegroundStreaks(FOREGROUND_STREAK_COUNT),
     [],
   );
-  const appVersion = Constants.expoConfig?.version ?? "0.1.9";
+  const appVersion = Constants.expoConfig?.version ?? "0.1.11";
 
   useEffect(() => {
     boostRef.current = isBoosting;
