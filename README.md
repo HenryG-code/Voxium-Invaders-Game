@@ -29,10 +29,14 @@ Voxium Invaders is a mobile arcade space shooter built with React Native, Expo, 
 <img width="372" height="757" alt="image" src="https://github.com/user-attachments/assets/4b8c7b0a-67dd-47be-9c30-6e748993d6c1" />
 <img width="370" height="751" alt="image" src="https://github.com/user-attachments/assets/7211bd3f-0a1f-415e-b73e-8efbcf352c21" />
 
-
-
 ## Getting Started
 
 ```bash
 npm install
 npx expo start
+
+
+## Development Status
+
+Voxium Invaders is currently in prototype development, with ongoing improvements to gameplay, visuals, mobile controls, and performance.
+```
