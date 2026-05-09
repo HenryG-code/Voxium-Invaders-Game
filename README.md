@@ -1,42 +1,49 @@
-<img width="377" height="762" alt="image" src="https://github.com/user-attachments/assets/e1b8cbb3-3932-4ae1-9c17-4ffd9a1724fb" /># Voxium Invaders
+# Voxium Invaders
 
-Voxium Invaders is a mobile arcade space shooter built with React Native, Expo, and TypeScript. The project was created as a portfolio game prototype to demonstrate real-time gameplay logic, mobile controls, audio integration, scoring, enemy spawning, boss battles, and custom UI screens.
+Voxium Invaders is a mobile arcade space shooter built with React Native, Expo, and TypeScript. It combines real-time combat, enemy spawning, boss fights, mobile controls, audio, scoring, and retro sci-fi presentation into a playable prototype.
 
-## Features
+## What Is In The Game
 
-- Mobile-first arcade shooter gameplay
-- Main menu, options, hangar, records, and credits screens
-- Player movement and boost controls
-- Standard and charged pulse attacks
-- Enemy spawning system
-- Asteroids and boss enemy logic
-- Collision detection
-- Score and high score tracking
-- Sound effects and background music
-- Retro sci-fi visual style
+- Menu, options, hangar, records, and credits flow
+- Player movement and boost control
+- Standard fire and charged pulse shots
+- Enemy spawning, asteroid pressure, and boss logic
+- Collision handling, scoring, lives, and shields
+- Music and sound effects
+- Retro space-shooter presentation
 
 ## Tech Stack
 
-- React Native
 - Expo
+- React Native
 - TypeScript
 - Expo Audio
 - Expo Image
-- React Navigation / Expo Router
+- Expo Router
 
-## Screenshots
+## Project Layout
 
-<img width="372" height="757" alt="image" src="https://github.com/user-attachments/assets/4b8c7b0a-67dd-47be-9c30-6e748993d6c1" />
-<img width="370" height="751" alt="image" src="https://github.com/user-attachments/assets/7211bd3f-0a1f-415e-b73e-8efbcf352c21" />
+- [`app/(tabs)/index.tsx`](app/(tabs)/index.tsx): main game screen and gameplay loop
+- [`app/(tabs)/hangar.tsx`](app/(tabs)/hangar.tsx): ship-selection hangar with unlock-ready fleet UI
+- [`components/game/game-logic.ts`](components/game/game-logic.ts): game constants, types, and core logic helpers
+- [`components/game/game-audio.ts`](components/game/game-audio.ts): audio safety helpers
+- [`components/game/game-actors.tsx`](components/game/game-actors.tsx): ship and enemy render pieces
+- [`components/ui/icon-symbol.tsx`](components/ui/icon-symbol.tsx): icon mapping for the tab bar
 
 ## Getting Started
 
 ```bash
 npm install
-npx expo start
-
-
-## Development Status
-
-Voxium Invaders is currently in prototype development, with ongoing improvements to gameplay, visuals, mobile controls, and performance.
+npm run start
 ```
+
+## Controls
+
+- Move left and right with the on-screen buttons
+- Hold Boost to surge forward
+- Tap Fire for standard shots
+- Hold Fire to charge the pulse attack
+
+## Current Status
+
+The prototype is playable, and the codebase is now being split into smaller gameplay modules so it is easier to extend stage logic, enemy behavior, and UI sections without fighting one giant screen file.

@@ -1,7 +1,8 @@
-import { setAudioModeAsync, useAudioPlayer } from "expo-audio";
-import Constants from "expo-constants";
-import { Image as ExpoImage } from "expo-image";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useIsFocused } from '@react-navigation/native';
+import { setAudioModeAsync, useAudioPlayer } from 'expo-audio';
+import Constants from 'expo-constants';
+import { useRouter } from 'expo-router';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   GestureResponderEvent,
   LayoutChangeEvent,
@@ -11,497 +12,103 @@ import {
   Text,
   useWindowDimensions,
   View,
-} from "react-native";
+} from 'react-native';
+import MaterialIcons from '@expo/vector-icons/MaterialIcons';
 
-const SCREEN_HORIZONTAL_PADDING = 18;
-const SCREEN_TOP_PADDING = 56;
-const SCREEN_BOTTOM_PADDING = 24;
-
-const SHIP_STEP = 24;
-const SHIP_FRAME_WIDTH = 200;
-const SHIP_FRAME_HEIGHT = 200;
-const SHIP_BOUNDING_WIDTH = 160;
-const SHIP_MUZZLE_OFFSET = 18;
-const SHIP_PIXEL_SIZE = 4;
-const PLAYER_SHIP_IMAGE = require("../../assets/images/playerShip.png");
-const ENEMY_MODEL_IMAGE = require("../../assets/images/Enemy1.png");
-const PLAY_AREA_PADDING = 22;
-const PLAY_AREA_BOTTOM_PADDING = 18;
-
-const BOSS_STAGE = 1;
-const BOSS_HP = 18;
-
-const FAR_STAR_COUNT = 36;
-const MID_STAR_COUNT = 32;
-const NEAR_STAR_COUNT = 28;
-const FOREGROUND_STREAK_COUNT = 6;
-const SPEED_LINE_COUNT = 6;
-
-const NORMAL_TRAVEL_PER_MS = 0.00018;
-const BOOST_TRAVEL_PER_MS = 0.00038;
-const BULLET_SPEED_PX_PER_MS = 0.92;
-const MOVE_SOUND_COOLDOWN_MS = 140;
-const FIRE_COOLDOWN_MS = 130;
-const PULSE_FIRE_COOLDOWN_MS = 380;
-const PULSE_CHARGE_MS = 320;
-const MAX_ACTIVE_BULLETS = 10;
-const COLLISION_BIN_WIDTH = 64;
-const BULLET_WIDTH = 6;
-const BULLET_HEIGHT = 24;
-const PULSE_BULLET_WIDTH = 34;
-const PULSE_BULLET_HEIGHT = 30;
-const PULSE_BULLET_SPEED_PX_PER_MS = 0.8;
-const ENEMY_FRAME_WIDTH = 126;
-const ENEMY_FRAME_HEIGHT = 69;
-const ASTEROID_FRAME_SIZE = 84;
-const TOUCH_CONTROL_HEIGHT = 120;
-const SHIP_COLLISION_HEIGHT = 30;
-const MAX_SHIELD_POINTS = 3;
-const EXPLOSION_DURATION_MS = 420;
-
-const INITIAL_LIVES = 5;
-
-type GameState = "menu" | "playing" | "stageClear" | "gameOver";
-type StarLayer = "far" | "mid" | "near";
-type MenuPanel = "main" | "options" | "hangar" | "credits" | "records";
-type ControlLayout = "classic" | "split";
-type EnemyKind = "grunt" | "boss" | "asteroid";
-type BulletKind = "standard" | "pulse";
-
-type FlightStar = {
-  id: number;
-  baseX: number;
-  size: number;
-  opacity: number;
-  speed: number;
-  phaseOffset: number;
-  layer: StarLayer;
-};
-
-type ForegroundStreak = {
-  id: number;
-  baseX: number;
-  speed: number;
-  length: number;
-  phaseOffset: number;
-};
-
-type Bullet = {
-  id: number;
-  x: number;
-  y: number;
-  kind: BulletKind;
-};
-
-type Enemy = {
-  id: number;
-  x: number;
-  y: number;
-  speed: number;
-  drift: number;
-  scale: number;
-  wobblePhase: number;
-  kind: EnemyKind;
-  hp: number;
-  fireClockMs: number;
-  fireCooldownMs: number;
-};
-
-type SceneState = {
-  elapsedMs: number;
-  travel: number;
-  score: number;
-  playerHp: number;
-  playerShield: number;
-  stage: number;
-  stageKills: number;
-  bossDefeated: boolean;
-  bullets: Bullet[];
-  enemies: Enemy[];
-  explosions: Explosion[];
-  lives: number;
-};
-
-type Explosion = {
-  id: number;
-  x: number;
-  y: number;
-  size: number;
-  ageMs: number;
-  maxAgeMs: number;
-  color: string;
-};
-
-type HeroShipProps = {
-  bankAngle: number;
-  isBoosting: boolean;
-  shipOffset?: number;
-  shipLift?: number;
-  scale?: number;
-  decorative?: boolean;
-};
-
-type AlienInvaderProps = {
-  enemy: Enemy;
-  elapsedMs: number;
-  contentWidth: number;
-};
-
-type EnemyCollisionCandidate = {
-  enemy: Enemy;
-  centerX: number;
-  centerY: number;
-  halfWidth: number;
-  halfHeight: number;
-};
-
-const BOSS_SPAWN_KILL_THRESHOLD_STAGE_1 = 10;
-const BOSS_SPAWN_KILL_THRESHOLD_STAGE_2 = 14;
-const CREDITS_BLOCK_TEXT = `=== VOXIUM INVADERS ===
-
-A retro space shooter prototype
-
-CREATED BY
-Henry Oosthuizen
-
-GAME DESIGN & DEVELOPMENT
-Henry Oosthuizen
-
-ASSETS, SOUNDS & GAME MODELS
-Christian Jooste
-
-BUILT WITH
-React Native
-Expo
-TypeScript
-
-TOOLS & SUPPORT
-OpenAI Codex
-ChatGPT
-Visual Studio Code
-Android Studio
-
-VISUAL STYLE
-Retro arcade space combat
-Deep-space environments
-Hero fighter concept and gameplay direction
-
-SPECIAL THANKS
-Friends, testers, and early supporters
-
-VERSION
-Prototype v1.0
-
-THANK YOU FOR PLAYING
-The Voxium Sector still needs you...`;
-
-function clamp(value: number, min: number, max: number) {
-  return Math.max(min, Math.min(max, value));
-}
-
-function getBulletWidth(kind: BulletKind) {
-  return kind === "pulse" ? PULSE_BULLET_WIDTH : BULLET_WIDTH;
-}
-
-function getBulletHeight(kind: BulletKind) {
-  return kind === "pulse" ? PULSE_BULLET_HEIGHT : BULLET_HEIGHT;
-}
-
-function getBulletSpeed(kind: BulletKind) {
-  return kind === "pulse" ? PULSE_BULLET_SPEED_PX_PER_MS : BULLET_SPEED_PX_PER_MS;
-}
-
-function getBulletDamage(kind: BulletKind) {
-  return kind === "pulse" ? 2 : 1;
-}
-
-function getEnemyFrameWidth(kind: EnemyKind) {
-  return kind === "asteroid" ? ASTEROID_FRAME_SIZE : ENEMY_FRAME_WIDTH;
-}
-
-function getEnemyFrameHeight(kind: EnemyKind) {
-  return kind === "asteroid" ? ASTEROID_FRAME_SIZE : ENEMY_FRAME_HEIGHT;
-}
-
-function getEnemyScore(kind: EnemyKind) {
-  if (kind === "boss") {
-    return 1000;
-  }
-
-  return kind === "asteroid" ? 150 : 100;
-}
-
-function getEnemyDamage(kind: EnemyKind) {
-  if (kind === "boss") {
-    return 2;
-  }
-
-  return 1;
-}
-
-function createExplosion(
-  id: number,
-  x: number,
-  y: number,
-  kind: EnemyKind,
-): Explosion {
-  if (kind === "boss") {
-    return {
-      id,
-      x,
-      y,
-      size: 116,
-      ageMs: 0,
-      maxAgeMs: EXPLOSION_DURATION_MS + 160,
-      color: "#FFE184",
-    };
-  }
-
-  if (kind === "asteroid") {
-    return {
-      id,
-      x,
-      y,
-      size: 68,
-      ageMs: 0,
-      maxAgeMs: EXPLOSION_DURATION_MS,
-      color: "#F4B979",
-    };
-  }
-
-  return {
-    id,
-    x,
-    y,
-    size: 54,
-    ageMs: 0,
-    maxAgeMs: EXPLOSION_DURATION_MS,
-    color: "#7BE7FF",
-  };
-}
-
-function applyPlayerDamage(
-  playerShield: number,
-  playerHp: number,
-  damage: number,
-) {
-  let nextShield = playerShield;
-  let nextHp = playerHp;
-  let remainingDamage = damage;
-
-  if (nextShield > 0) {
-    const absorbed = Math.min(nextShield, remainingDamage);
-    nextShield -= absorbed;
-    remainingDamage -= absorbed;
-  }
-
-  if (remainingDamage > 0) {
-    nextHp = Math.max(0, nextHp - remainingDamage);
-  }
-
-  return {
-    playerShield: nextShield,
-    playerHp: nextHp,
-  };
-}
-
-function spreadFromCenter() {
-  const raw = Math.random() * 2 - 1;
-  return Math.sign(raw) * Math.pow(Math.abs(raw), 1.4);
-}
-
-function createStars(
-  count: number,
-  layer: StarLayer,
-  startId: number,
-): FlightStar[] {
-  const settings = {
-    far: { size: 1.6, opacity: 0.35, speedMin: 0.42, speedMax: 0.58 },
-    mid: { size: 2.2, opacity: 0.55, speedMin: 0.72, speedMax: 0.94 },
-    near: { size: 3, opacity: 0.85, speedMin: 1.08, speedMax: 1.32 },
-  };
-
-  const layerSettings = settings[layer];
-
-  return Array.from({ length: count }, (_, index) => ({
-    id: startId + index,
-    baseX: spreadFromCenter(),
-    size: layerSettings.size + Math.random() * 0.9,
-    opacity: layerSettings.opacity + Math.random() * 0.1,
-    speed:
-      layerSettings.speedMin +
-      Math.random() * (layerSettings.speedMax - layerSettings.speedMin),
-    phaseOffset: Math.random(),
-    layer,
-  }));
-}
-
-function createForegroundStreaks(count: number): ForegroundStreak[] {
-  return Array.from({ length: count }, (_, index) => ({
-    id: index,
-    baseX: (Math.random() * 2 - 1) * 0.32,
-    speed: 1.1 + Math.random() * 0.4,
-    length: 40 + Math.random() * 46,
-    phaseOffset: Math.random(),
-  }));
-}
-
-function createEnemy(
-  id: number,
-  contentWidth: number,
-  kind: EnemyKind = "grunt",
-  stage = 1,
-): Enemy {
-  const maxSpawnOffset = Math.max(40, contentWidth / 2 - 42);
-
-  return {
-    id,
-    kind,
-    x:
-      kind === "boss"
-        ? 0
-        : kind === "asteroid"
-          ? (Math.random() * 2 - 1) * (maxSpawnOffset * 1.1)
-          : (Math.random() * 2 - 1) * maxSpawnOffset,
-    y: kind === "boss" ? (stage >= 2 ? 76 : 86) : kind === "asteroid" ? -104 : -88,
-    speed:
-      kind === "boss"
-        ? 0.012
-        : kind === "asteroid"
-          ? 0.062 + Math.random() * 0.04
-          : 0.048 + Math.random() * 0.05,
-    drift:
-      kind === "boss"
-        ? 0
-        : kind === "asteroid"
-          ? (Math.random() * 2 - 1) * 0.022
-          : (Math.random() * 2 - 1) * 0.012,
-    scale:
-      kind === "boss"
-        ? (stage >= 2 ? 1.72 : 1.62)
-        : kind === "asteroid"
-          ? 0.82 + Math.random() * 0.4
-          : 0.9 + Math.random() * 0.28,
-    wobblePhase: Math.random() * Math.PI * 2,
-    hp: kind === "boss" ? BOSS_HP : kind === "asteroid" ? 2 : 1,
-    fireClockMs: Math.random() * 800,
-    fireCooldownMs:
-      kind === "boss"
-        ? 1400
-        : stage >= 2
-          ? 1900 + Math.random() * 800
-          : 2600 + Math.random() * 1100,
-  };
-}
-
-function getEnemyCenterX(enemy: Enemy, elapsedMs: number) {
-  const wobble =
-    enemy.kind === "boss" ? 10 : enemy.kind === "asteroid" ? 2 : 4;
-  return enemy.x + Math.sin(elapsedMs / 420 + enemy.wobblePhase) * wobble;
-}
-
-function getEnemyCenterY(enemy: Enemy, elapsedMs: number) {
-  const sway =
-    enemy.kind === "boss" ? 5 : enemy.kind === "asteroid" ? 1.5 : 3;
-  return enemy.y + Math.cos(elapsedMs / 560 + enemy.wobblePhase * 0.8) * sway;
-}
-
-function HeroShip({
-  bankAngle,
-  isBoosting,
-  shipOffset = 0,
-  shipLift = 0,
-  scale = 1,
-  decorative = false,
-}: HeroShipProps) {
-  const accelerationScale = isBoosting ? 1.02 : 1;
-  const modelScale = decorative ? 1.04 : 1;
-
-  return (
-    <View
-      style={[
-        styles.playerShipFrame,
-        {
-          transform: [
-            { translateX: shipOffset },
-            { translateY: shipLift },
-            { rotate: `${bankAngle}deg` },
-            { scaleX: scale * modelScale * accelerationScale },
-            { scaleY: scale * modelScale * (isBoosting ? 1.02 : 1) },
-          ],
-        },
-      ]}
-    >
-      <View
-        style={[
-          styles.playerShipShadow,
-          decorative && styles.playerShipShadowDecorative,
-        ]}
-      />
-      <ExpoImage
-        source={PLAYER_SHIP_IMAGE}
-        contentFit="contain"
-        style={styles.playerShipSvgImage}
-      />
-    </View>
-  );
-}
-
-function AlienInvader({ enemy, elapsedMs, contentWidth }: AlienInvaderProps) {
-  const centerX = getEnemyCenterX(enemy, elapsedMs);
-  const centerY = getEnemyCenterY(enemy, elapsedMs);
-  const frameWidth = getEnemyFrameWidth(enemy.kind);
-  const frameHeight = getEnemyFrameHeight(enemy.kind);
-  const asteroidSpin = `${(elapsedMs / 16 + enemy.wobblePhase * 28) % 360}deg`;
-
-  return (
-    <View
-      style={[
-        styles.enemyFrame,
-        {
-          left: contentWidth / 2 + centerX - frameWidth / 2,
-          top: centerY - frameHeight / 2,
-          width: frameWidth,
-          height: frameHeight,
-          marginLeft: 0,
-          marginTop: 0,
-          transform:
-            enemy.kind === "asteroid"
-              ? [{ scale: enemy.scale }, { rotate: asteroidSpin }]
-              : [{ scale: enemy.scale }],
-        },
-      ]}
-    >
-      {enemy.kind === "asteroid" ? (
-        <View style={styles.asteroidShell}>
-          <View style={styles.asteroidFacetA} />
-          <View style={styles.asteroidFacetB} />
-          <View style={styles.asteroidFacetC} />
-          <View style={styles.asteroidCraterLarge} />
-          <View style={styles.asteroidCraterSmall} />
-        </View>
-      ) : (
-        <>
-          <View
-            style={[
-              styles.enemyGlow,
-              enemy.kind === "boss"
-                ? styles.enemyGlowBoss
-                : styles.enemyGlowGrunt,
-            ]}
-          />
-          <ExpoImage
-            source={ENEMY_MODEL_IMAGE}
-            contentFit="contain"
-            style={styles.enemyShipImage}
-          />
-        </>
-      )}
-    </View>
-  );
-}
+import { AlienInvader, HeroShip } from '@/components/game/game-actors';
+import { playSoundSafely, resetSoundSafely } from '@/components/game/game-audio';
+import {
+  getUnlockedHangarShips,
+  HANGAR_SHIPS,
+  HANGAR_STAGE_CLEARANCE,
+} from '@/components/game/hangar-data';
+import {
+  advanceBossLasers,
+  createBossLaser,
+  doesBossLaserHitShip,
+  getBossLaserOriginY,
+  getStageEnemySpawnKind,
+  getStageMaxHostiles,
+  shouldLaunchBossLaser,
+} from '@/components/game/game-enemy-system';
+import { getMainMenuReturnRequestId } from '@/components/game/main-menu-return';
+import {
+  applyPlayerDamage,
+  BOOST_TRAVEL_PER_MS,
+  BossLaser,
+  BOSS_STAGE,
+  BULLET_HEIGHT,
+  BULLET_WIDTH,
+  Bullet,
+  CREDITS_BLOCK_TEXT,
+  ControlLayout,
+  createEnemy,
+  createExplosion,
+  createForegroundStreaks,
+  createStars,
+  ASTEROID_FRAME_SIZE,
+  COLLISION_BIN_WIDTH,
+  ENEMY_FRAME_HEIGHT,
+  ENEMY_FRAME_WIDTH,
+  Enemy,
+  EnemyCollisionCandidate,
+  EnemyKind,
+  FAR_STAR_COUNT,
+  FIRE_COOLDOWN_MS,
+  FOREGROUND_STREAK_COUNT,
+  GameState,
+  getBulletDamage,
+  getBulletHeight,
+  getBulletSpeed,
+  getBulletWidth,
+  getEnemyDamage,
+  getEnemyFrameHeight,
+  getEnemyFrameWidth,
+  getEnemyScore,
+  INITIAL_LIVES,
+  MAX_ACTIVE_BULLETS,
+  MAX_SHIELD_POINTS,
+  MenuPanel,
+  MID_STAR_COUNT,
+  MOVE_SOUND_COOLDOWN_MS,
+  NEAR_STAR_COUNT,
+  NORMAL_TRAVEL_PER_MS,
+  PLAY_AREA_BOTTOM_PADDING,
+  PLAY_AREA_PADDING,
+  SCREEN_BOTTOM_PADDING,
+  SCREEN_HORIZONTAL_PADDING,
+  SCREEN_TOP_PADDING,
+  SceneState,
+  SHIP_BOUNDING_WIDTH,
+  SHIP_FRAME_HEIGHT,
+  SHIP_FRAME_WIDTH,
+  SHIP_MUZZLE_OFFSET,
+  SHIP_PIXEL_SIZE,
+  SPEED_LINE_COUNT,
+  SHIP_COLLISION_HEIGHT,
+  BulletKind,
+  TOUCH_CONTROL_HEIGHT,
+  clamp,
+  getEnemyCenterX,
+  getEnemyCenterY,
+} from '@/components/game/game-logic';
+import {
+  getBossSpawnThreshold,
+  getNextEnemySpawnDelay,
+  getStageClearMessage,
+  getStageClearPrimaryLabel,
+  getStageClearSecondaryLabel,
+  getStageClearTitle,
+  getStageHudSubtitle,
+} from '@/components/game/game-stage';
+import {
+  getActiveShipId,
+  getShipGameplayProfile,
+} from '@/components/game/ship-loadout';
 
 export default function HomeScreen() {
+  const router = useRouter();
+  const isFocused = useIsFocused();
   const { width, height } = useWindowDimensions();
   const [gameState, setGameState] = useState<GameState>("menu");
   const [menuPanel, setMenuPanel] = useState<MenuPanel>("main");
@@ -525,9 +132,11 @@ export default function HomeScreen() {
     bossDefeated: false,
     bullets: [],
     enemies: [],
+    bossLasers: [],
     explosions: [],
     lives: INITIAL_LIVES,
   });
+  const [activeShipId, setActiveShipId] = useState(getActiveShipId());
 
   const boostRef = useRef(isBoosting);
   const isSfxEnabledRef = useRef(isSfxEnabled);
@@ -546,12 +155,14 @@ export default function HomeScreen() {
   const bulletIdRef = useRef(0);
   const enemyIdRef = useRef(0);
   const explosionIdRef = useRef(0);
+  const bossLaserIdRef = useRef(0);
   const enemySpawnClockRef = useRef(0);
   const nextEnemySpawnMsRef = useRef(1200);
   const bossSpawnedRef = useRef(false);
   const isFireHeldRef = useRef(false);
   const pulseModeRef = useRef(false);
   const fireHoldStartAtRef = useRef(0);
+  const handledMainMenuReturnRequestRef = useRef(0);
 
   const firePlayer = useAudioPlayer(
     require("../../assets/sounds/Blaster1.wav"),
@@ -563,6 +174,10 @@ export default function HomeScreen() {
   const movePlayer = useAudioPlayer(require("../../assets/sounds/Move.wav"));
   const destroyPlayer = useAudioPlayer(
     require("../../assets/sounds/Destroy1.wav"),
+  );
+  const bossPlayer = useAudioPlayer(require("../../assets/sounds/Boss1.wav"));
+  const wavePlayer = useAudioPlayer(
+    require("../../assets/sounds/Waveattack.wav"),
   );
   const menuMusicPlayer = useAudioPlayer(
     require("../../assets/sounds/Mainmenusong.mp3"),
@@ -588,6 +203,26 @@ export default function HomeScreen() {
 
   const foregroundStreaks = useMemo(
     () => createForegroundStreaks(FOREGROUND_STREAK_COUNT),
+    [],
+  );
+  const shipProfile = getShipGameplayProfile(activeShipId);
+  const {
+    moveStep,
+    pulseChargeMs,
+    standardFireCooldownMs,
+    shipScale,
+    shipBankMultiplier,
+    shipLiftOffset,
+  } = shipProfile;
+  const unlockedHangarShips = useMemo(
+    () => getUnlockedHangarShips(HANGAR_STAGE_CLEARANCE),
+    [],
+  );
+  const nextUnlockShip = useMemo(
+    () =>
+      HANGAR_SHIPS.find(
+        (ship) => ship.unlockStage > HANGAR_STAGE_CLEARANCE,
+      ) ?? null,
     [],
   );
   const appVersion = Constants.expoConfig?.version ?? "0.1.11";
@@ -636,6 +271,8 @@ export default function HomeScreen() {
     boostPlayer.volume = 0.4;
     movePlayer.volume = 0.28;
     destroyPlayer.volume = 0.38;
+    bossPlayer.volume = 0.5;
+    wavePlayer.volume = 0.34;
     menuMusicPlayer.volume = 0.22;
     stageMusicPlayer.volume = 0.12;
     menuMusicPlayer.loop = true;
@@ -643,10 +280,12 @@ export default function HomeScreen() {
   }, [
     boostPlayer,
     destroyPlayer,
+    bossPlayer,
     firePlayer,
     menuMusicPlayer,
     movePlayer,
     pulsePlayer,
+    wavePlayer,
     stageMusicPlayer,
   ]);
 
@@ -666,12 +305,12 @@ export default function HomeScreen() {
 
     if (gameState === "menu") {
       void resetSoundSafely(stageMusicPlayer);
-      void playSoundSafely(menuMusicPlayer, false);
+      void playSoundSafely(menuMusicPlayer, true, false);
       return;
     }
 
     void resetSoundSafely(menuMusicPlayer);
-    void playSoundSafely(stageMusicPlayer, false);
+    void playSoundSafely(stageMusicPlayer, true, false);
   }, [gameState, isMusicEnabled, menuMusicPlayer, stageMusicPlayer]);
 
   useEffect(() => {
@@ -681,14 +320,18 @@ export default function HomeScreen() {
       void resetSoundSafely(firePlayer);
       void resetSoundSafely(pulsePlayer);
       void resetSoundSafely(destroyPlayer);
+      void resetSoundSafely(bossPlayer);
+      void resetSoundSafely(wavePlayer);
     }
   }, [
+    bossPlayer,
     boostPlayer,
     destroyPlayer,
     firePlayer,
     isSfxEnabled,
     movePlayer,
     pulsePlayer,
+    wavePlayer,
   ]);
 
   useEffect(() => {
@@ -696,6 +339,29 @@ export default function HomeScreen() {
       setHighScore(scene.score);
     }
   }, [highScore, scene.score]);
+
+  useEffect(() => {
+    if (!isFocused) {
+      return;
+    }
+
+    setActiveShipId(getActiveShipId());
+
+    const requestId = getMainMenuReturnRequestId();
+    if (
+      requestId === 0 ||
+      requestId === handledMainMenuReturnRequestRef.current
+    ) {
+      return;
+    }
+
+    handledMainMenuReturnRequestRef.current = requestId;
+    setLastRunScore(sceneRef.current.score);
+    setGameState("menu");
+    setMenuPanel("main");
+    resetRunState();
+    void resetSoundSafely(boostPlayer);
+  }, [boostPlayer, isFocused]);
 
   useEffect(() => {
     let frameId = 0;
@@ -712,6 +378,8 @@ export default function HomeScreen() {
       if (gameStateRef.current === "playing") {
         let shouldPlayDestroySound = false;
         let shouldPlayPulseSound = false;
+        let shouldPlayWaveSound = false;
+        let shouldPlayBossSound = false;
         let shouldEnterStageClear = false;
         enemySpawnClockRef.current += deltaMs;
 
@@ -729,17 +397,16 @@ export default function HomeScreen() {
               ageMs: explosion.ageMs + deltaMs,
             }))
             .filter((explosion) => explosion.ageMs < explosion.maxAgeMs);
+          const nextBossLasers = advanceBossLasers(currentScene.bossLasers, deltaMs);
           const spawnedBullets: Bullet[] = [];
+          const spawnedBossLasers: BossLaser[] = [];
           const nextElapsedMs = currentScene.elapsedMs + deltaMs;
           let nextScore = currentScene.score || 0;
           let nextPlayerHp = currentScene.playerHp ?? INITIAL_LIVES;
           let nextPlayerShield = currentScene.playerShield || 0;
           let nextStageKills = currentScene.stageKills || 0;
           let bossDefeated = currentScene.bossDefeated || false;
-          const bossSpawnThreshold =
-            currentStage >= 2
-              ? BOSS_SPAWN_KILL_THRESHOLD_STAGE_2
-              : BOSS_SPAWN_KILL_THRESHOLD_STAGE_1;
+          const bossSpawnThreshold = getBossSpawnThreshold(currentStage);
           const bossAlreadyActive = currentScene.enemies.some(
             (enemy) => enemy.kind === "boss",
           );
@@ -765,7 +432,9 @@ export default function HomeScreen() {
 
           const queuePlayerShot = (kind: BulletKind) => {
             const cooldown =
-              kind === "pulse" ? PULSE_FIRE_COOLDOWN_MS : FIRE_COOLDOWN_MS;
+              kind === "pulse"
+                ? pulseChargeMs
+                : standardFireCooldownMs;
 
             if (nextElapsedMs - lastFireAtRef.current < cooldown) {
               return false;
@@ -801,7 +470,7 @@ export default function HomeScreen() {
           if (isFireHeldRef.current) {
             const heldDuration = nextElapsedMs - fireHoldStartAtRef.current;
 
-            if (heldDuration >= PULSE_CHARGE_MS) {
+            if (heldDuration >= pulseChargeMs) {
               pulseModeRef.current = true;
             }
 
@@ -824,6 +493,7 @@ export default function HomeScreen() {
               );
               bossSpawnedRef.current = true;
               shouldSpawnBoss = false;
+              shouldPlayBossSound = true;
               break;
             } else {
               const activeHostileCount = currentScene.enemies.filter(
@@ -832,11 +502,8 @@ export default function HomeScreen() {
               const pendingHostileCount = spawnedEnemies.filter(
                 (enemy) => enemy.kind !== "boss",
               ).length;
-              const maxHostiles = currentStage >= 2 ? 5 : 4;
-              const spawnKind: EnemyKind =
-                currentStage >= 2 && Math.random() < 0.38
-                  ? "asteroid"
-                  : "grunt";
+              const maxHostiles = getStageMaxHostiles(currentStage);
+              const spawnKind = getStageEnemySpawnKind(currentStage);
 
               if (activeHostileCount + pendingHostileCount < maxHostiles) {
                 spawnedEnemies.push(
@@ -847,11 +514,11 @@ export default function HomeScreen() {
                     currentStage,
                   ),
                 );
+                shouldPlayWaveSound = true;
               }
             }
 
-            nextEnemySpawnMsRef.current =
-              currentStage >= 2 ? 1650 + Math.random() * 800 : 1750 + Math.random() * 900;
+            nextEnemySpawnMsRef.current = getNextEnemySpawnDelay(currentStage);
           }
 
           for (const enemy of currentScene.enemies) {
@@ -861,6 +528,23 @@ export default function HomeScreen() {
               y: enemy.y + enemy.speed * deltaMs,
               fireClockMs: enemy.fireClockMs + deltaMs,
             };
+
+            if (
+              shouldLaunchBossLaser(
+                advancedEnemy,
+                currentStage,
+                advancedEnemy.fireClockMs,
+              )
+            ) {
+              spawnedBossLasers.push(
+                createBossLaser(
+                  bossLaserIdRef.current++,
+                  clamp(shipOffsetRef.current, -maxShipOffset, maxShipOffset),
+                  getBossLaserOriginY(advancedEnemy, nextElapsedMs),
+                ),
+              );
+              advancedEnemy.fireClockMs = 0;
+            }
 
             advancedEnemies.push(advancedEnemy);
 
@@ -971,12 +655,12 @@ export default function HomeScreen() {
                 Math.abs(nextBullet.x - candidate.centerX) <=
                 candidate.halfWidth +
                   bulletWidth / 2 +
-                  (bullet.kind === "pulse" ? 18 : 0);
+                  (bullet.kind === "pulse" ? 26 : 0);
               const bulletHitY =
                 Math.abs(bulletCenterY - candidate.centerY) <=
                 candidate.halfHeight +
                   bulletHeight / 2 +
-                  (bullet.kind === "pulse" ? 10 : 0);
+                  (bullet.kind === "pulse" ? 18 : 0);
 
               if (bulletHitX && bulletHitY) {
                 impactedCandidates.push(candidate);
@@ -1051,6 +735,28 @@ export default function HomeScreen() {
             survivingEnemies.push(enemy);
           }
 
+          for (const laser of nextBossLasers) {
+            if (
+              !doesBossLaserHitShip(
+                laser,
+                shipOffsetRef.current,
+                shipCenterY,
+                SHIP_BOUNDING_WIDTH,
+              )
+            ) {
+              continue;
+            }
+
+            const damageResult = applyPlayerDamage(
+              nextPlayerShield,
+              nextPlayerHp,
+              1,
+            );
+            nextPlayerShield = damageResult.playerShield;
+            nextPlayerHp = damageResult.playerHp;
+            laser.hasHitPlayer = true;
+          }
+
           if (shouldEnterStageClear) {
             return {
               elapsedMs: nextElapsedMs,
@@ -1066,6 +772,7 @@ export default function HomeScreen() {
               bossDefeated,
               bullets: [],
               enemies: [],
+              bossLasers: [],
               explosions: nextExplosions,
               lives: nextPlayerHp,
             };
@@ -1085,17 +792,27 @@ export default function HomeScreen() {
             bossDefeated,
             bullets: [...survivingBullets, ...spawnedBullets],
             enemies: survivingEnemies,
+            bossLasers: [...nextBossLasers, ...spawnedBossLasers],
             explosions: nextExplosions,
             lives: nextPlayerHp,
           };
         });
 
         if (shouldPlayDestroySound) {
-          void playSoundSafely(destroyPlayer);
+      void playSoundSafely(destroyPlayer, isSfxEnabledRef.current);
         }
 
         if (shouldPlayPulseSound) {
-          void playSoundSafely(pulsePlayer);
+          void resetSoundSafely(firePlayer);
+          void playSoundSafely(pulsePlayer, isSfxEnabledRef.current);
+        }
+
+        if (shouldPlayWaveSound) {
+          void playSoundSafely(wavePlayer, isSfxEnabledRef.current);
+        }
+
+        if (shouldPlayBossSound) {
+          void playSoundSafely(bossPlayer, isSfxEnabledRef.current);
         }
 
       }
@@ -1106,7 +823,16 @@ export default function HomeScreen() {
     frameId = requestAnimationFrame(animate);
 
     return () => cancelAnimationFrame(frameId);
-  }, [destroyPlayer, pulsePlayer]);
+  }, [
+    bossPlayer,
+    destroyPlayer,
+    firePlayer,
+    maxShipOffset,
+    pulseChargeMs,
+    pulsePlayer,
+    standardFireCooldownMs,
+    wavePlayer,
+  ]);
 
   useEffect(() => {
     if (gameState === "playing" && scene.playerHp <= 0) {
@@ -1131,33 +857,6 @@ export default function HomeScreen() {
     }
   }, [boostPlayer, gameState, scene.bossDefeated, scene.score]);
 
-  const playSoundSafely = async (
-    player: ReturnType<typeof useAudioPlayer>,
-    respectSfxSetting = true,
-  ) => {
-    if (respectSfxSetting && !isSfxEnabledRef.current) {
-      return;
-    }
-
-    try {
-      await player.seekTo(0);
-      player.play();
-    } catch {
-      try {
-        player.play();
-      } catch {}
-    }
-  };
-
-  const resetSoundSafely = async (
-    player: ReturnType<typeof useAudioPlayer>,
-  ) => {
-    try {
-      player.pause();
-      await player.seekTo(0);
-    } catch {}
-  };
-
   const resetRunState = () => {
     setIsBoosting(false);
     setIsFireHeld(false);
@@ -1169,6 +868,7 @@ export default function HomeScreen() {
     bulletIdRef.current = 0;
     enemyIdRef.current = 0;
     explosionIdRef.current = 0;
+    bossLaserIdRef.current = 0;
     enemySpawnClockRef.current = 0;
     nextEnemySpawnMsRef.current = 1200;
     bossSpawnedRef.current = false;
@@ -1186,6 +886,7 @@ export default function HomeScreen() {
       bossDefeated: false,
       bullets: [],
       enemies: [],
+      bossLasers: [],
       explosions: [],
       lives: INITIAL_LIVES,
     });
@@ -1208,6 +909,7 @@ export default function HomeScreen() {
       bossDefeated: false,
       bullets: [],
       enemies: [],
+      bossLasers: [],
       explosions: [],
     }));
     enemySpawnClockRef.current = 0;
@@ -1243,7 +945,7 @@ export default function HomeScreen() {
 
     const currentScene = sceneRef.current;
     const cooldown =
-      kind === "pulse" ? PULSE_FIRE_COOLDOWN_MS : FIRE_COOLDOWN_MS;
+      kind === "pulse" ? pulseChargeMs : standardFireCooldownMs;
 
     if (currentScene.elapsedMs - lastFireAtRef.current < cooldown) {
       return false;
@@ -1255,7 +957,7 @@ export default function HomeScreen() {
 
     const activePlayAreaHeight =
       playAreaHeightRef.current || Math.max(260, heightRef.current * 0.52);
-    const currentShipLift = boostRef.current ? -16 : 0;
+    const currentShipLift = (boostRef.current ? -16 : 0) + shipLiftOffset;
     const bulletHeight = getBulletHeight(kind);
     const bulletStartY =
       activePlayAreaHeight -
@@ -1309,7 +1011,7 @@ export default function HomeScreen() {
       lastMoveAtRef.current = sceneRef.current.elapsedMs;
       lastMoveDirectionRef.current = direction;
       lastMoveSoundAtRef.current = sceneRef.current.elapsedMs;
-      void playSoundSafely(movePlayer);
+    void playSoundSafely(movePlayer, isSfxEnabledRef.current);
     } else if (didMove) {
       lastMoveAtRef.current = sceneRef.current.elapsedMs;
       lastMoveDirectionRef.current = direction;
@@ -1317,7 +1019,7 @@ export default function HomeScreen() {
   };
 
   const moveShip = (direction: -1 | 1) => {
-    moveShipToOffset(shipOffsetRef.current + direction * SHIP_STEP);
+    moveShipToOffset(shipOffsetRef.current + direction * moveStep);
   };
 
   const handleTouchMoveShip = (event: GestureResponderEvent) => {
@@ -1339,7 +1041,7 @@ export default function HomeScreen() {
     setIsFireHeld(true);
 
     if (spawnPlayerShot("standard")) {
-      void playSoundSafely(firePlayer);
+      void playSoundSafely(firePlayer, isSfxEnabledRef.current);
     }
   };
 
@@ -1356,7 +1058,7 @@ export default function HomeScreen() {
     }
 
     setIsBoosting(true);
-    void playSoundSafely(boostPlayer);
+    void playSoundSafely(boostPlayer, isSfxEnabledRef.current);
   };
 
   const handleBoostEnd = () => {
@@ -1383,9 +1085,10 @@ export default function HomeScreen() {
     0,
     1 - (scene.elapsedMs - lastMoveAtRef.current) / 220,
   );
-  const shipBank = lastMoveDirectionRef.current * bankProgress * 9;
+  const shipBank =
+    lastMoveDirectionRef.current * bankProgress * 9 * shipBankMultiplier;
   const motionIntensity = isBoosting ? 1 : isManeuvering ? 0.45 : 0.14;
-  const shipLift = isBoosting ? -16 : 0;
+  const shipLift = (isBoosting ? -16 : 0) + shipLiftOffset;
   const travelAmount = gameState === "playing" ? scene.travel : 0;
   const scoreDisplay = String(scene.score).padStart(4, "0");
   const highScoreDisplay = String(highScore).padStart(4, "0");
@@ -1404,6 +1107,30 @@ export default function HomeScreen() {
                 {
                   translateX: gameState === "playing" ? travelAmount * -24 : 0,
                 },
+                { rotate: "-18deg" },
+              ],
+            },
+          ]}
+        />
+        <View
+          style={[
+            styles.milkyWayCore,
+            {
+              transform: [
+                {
+                  translateX: gameState === "playing" ? travelAmount * -18 : 0,
+                },
+                { rotate: "-18deg" },
+              ],
+            },
+          ]}
+        />
+        <View
+          style={[
+            styles.milkyWayDustLane,
+            {
+              transform: [
+                { translateX: gameState === "playing" ? travelAmount * 12 : 0 },
                 { rotate: "-18deg" },
               ],
             },
@@ -1484,7 +1211,11 @@ export default function HomeScreen() {
               ],
             },
           ]}
-        />
+        >
+          <View style={styles.distantPlanetShadow} />
+          <View style={styles.distantPlanetRing} />
+          <View style={styles.distantPlanetCap} />
+        </View>
         <View style={styles.distantPlanetGlow} />
         <View
           style={[
@@ -1557,7 +1288,15 @@ export default function HomeScreen() {
                   ],
                 },
               ]}
-            />
+            >
+              <View
+                style={[
+                  styles.starGlow,
+                  star.layer === "near" && styles.nearStarGlow,
+                ]}
+              />
+              <View style={styles.starCore} />
+            </View>
           );
         })}
 
@@ -1684,6 +1423,7 @@ export default function HomeScreen() {
                   isBoosting={false}
                   scale={1.08}
                   decorative
+                  styles={styles}
                 />
               </View>
             </>
@@ -1729,7 +1469,38 @@ export default function HomeScreen() {
           ) : menuPanel === "hangar" ? (
             <View style={styles.menuPanel}>
               <Text style={styles.menuPanelTitle}>SHIP HANGAR</Text>
-              <Text style={styles.menuPanelBody}>COMING SOON</Text>
+              <Text style={styles.menuPanelBody}>
+                {unlockedHangarShips.length} FRAMES READY IN BAY
+              </Text>
+              <View style={styles.menuHangarPreview}>
+                {unlockedHangarShips.slice(0, 2).map((ship) => (
+                  <View
+                    key={ship.id}
+                    style={[
+                      styles.menuHangarShipCard,
+                      { borderColor: ship.accent },
+                    ]}
+                  >
+                    <Text style={styles.menuHangarShipName}>{ship.name}</Text>
+                    <Text style={styles.menuHangarShipWeapon}>
+                      {ship.weapon}
+                    </Text>
+                  </View>
+                ))}
+              </View>
+              {nextUnlockShip ? (
+                <Text style={styles.menuHangarHint}>
+                  NEXT UNLOCK: {nextUnlockShip.name} AT STAGE{" "}
+                  {nextUnlockShip.unlockStage}
+                </Text>
+              ) : null}
+              <Pressable
+                style={styles.menuStartButton}
+                onPress={() => router.push("/hangar")}
+                android_disableSound
+              >
+                <Text style={styles.menuStartButtonText}>OPEN HANGAR BAY</Text>
+              </Pressable>
               <Pressable
                 style={styles.menuBackButton}
                 onPress={() => setMenuPanel("main")}
@@ -1786,7 +1557,7 @@ export default function HomeScreen() {
             <View style={styles.hudBlockRight}>
               <Text style={styles.hudText}>STAGE {scene.stage}</Text>
               <Text style={styles.hudSubtext}>
-                {scene.stage === 2 ? "ASTEROIDS LIVE" : "BOSS INBOUND"}
+                {getStageHudSubtitle(scene.stage)}
               </Text>
             </View>
           </View>
@@ -1860,8 +1631,62 @@ export default function HomeScreen() {
                   enemy={enemy}
                   elapsedMs={scene.elapsedMs}
                   contentWidth={contentWidth}
+                  styles={styles}
                 />
               ))}
+            </View>
+
+            <View style={styles.enemyLaserLayer} pointerEvents="none">
+              {scene.bossLasers.map((laser) => {
+                const isActive = laser.telegraphMs >= laser.maxTelegraphMs;
+                const activePlayAreaHeight =
+                  playAreaHeight || Math.max(260, height * 0.52);
+                const beamHeight = Math.max(0, activePlayAreaHeight - laser.y);
+
+                return (
+                  <View
+                    key={laser.id}
+                    style={[
+                      styles.enemyLaserBeam,
+                      isActive
+                        ? styles.enemyLaserBeamActive
+                        : styles.enemyLaserBeamTelegraph,
+                      {
+                        left: contentWidth / 2 + laser.x - laser.width / 2,
+                        top: laser.y,
+                        width: laser.width,
+                        height: beamHeight,
+                        opacity: isActive ? 1 : 0.62,
+                      },
+                    ]}
+                  >
+                    <View
+                      style={[
+                        styles.enemyLaserAura,
+                        isActive
+                          ? styles.enemyLaserAuraActive
+                          : styles.enemyLaserAuraTelegraph,
+                      ]}
+                    />
+                    <View
+                      style={[
+                        styles.enemyLaserEmitter,
+                        isActive
+                          ? styles.enemyLaserEmitterActive
+                          : styles.enemyLaserEmitterTelegraph,
+                      ]}
+                    />
+                    <View
+                      style={[
+                        styles.enemyLaserCore,
+                        isActive
+                          ? styles.enemyLaserCoreActive
+                          : styles.enemyLaserCoreTelegraph,
+                      ]}
+                    />
+                  </View>
+                );
+              })}
             </View>
 
             <View style={styles.bulletLayer} pointerEvents="none">
@@ -1937,6 +1762,8 @@ export default function HomeScreen() {
               isBoosting={isBoosting}
               shipOffset={shipOffset}
               shipLift={shipLift}
+              scale={shipScale}
+              styles={styles}
             />
 
             {gameState === "gameOver" && (
@@ -1967,12 +1794,10 @@ export default function HomeScreen() {
             {gameState === "stageClear" && (
               <View style={styles.gameOverOverlay}>
                 <Text style={styles.gameOverTitle}>
-                  {scene.stage === 1 ? "STAGE 1 COMPLETE" : "STAGE 2 COMPLETE"}
+                  {getStageClearTitle(scene.stage)}
                 </Text>
                 <Text style={styles.gameOverText}>
-                  {scene.stage === 1
-                    ? "The boss is down. Shields restored by 3. Continue to stage 2."
-                    : "Stage 2 cleared. Return to the menu or restart the run."}
+                  {getStageClearMessage(scene.stage)}
                 </Text>
                 {scene.stage === 1 ? (
                   <>
@@ -1982,7 +1807,7 @@ export default function HomeScreen() {
                       android_disableSound
                     >
                       <Text style={styles.gameOverPrimaryButtonText}>
-                        CONTINUE TO STAGE 2
+                        {getStageClearPrimaryLabel(scene.stage)}
                       </Text>
                     </Pressable>
                     <Pressable
@@ -1991,7 +1816,7 @@ export default function HomeScreen() {
                       android_disableSound
                     >
                       <Text style={styles.gameOverSecondaryButtonText}>
-                        MAIN MENU
+                        {getStageClearSecondaryLabel(scene.stage)}
                       </Text>
                     </Pressable>
                   </>
@@ -2003,7 +1828,7 @@ export default function HomeScreen() {
                       android_disableSound
                     >
                       <Text style={styles.gameOverPrimaryButtonText}>
-                        MAIN MENU
+                        {getStageClearPrimaryLabel(scene.stage)}
                       </Text>
                     </Pressable>
                     <Pressable
@@ -2012,7 +1837,7 @@ export default function HomeScreen() {
                       android_disableSound
                     >
                       <Text style={styles.gameOverSecondaryButtonText}>
-                        RESTART RUN
+                        {getStageClearSecondaryLabel(scene.stage)}
                       </Text>
                     </Pressable>
                   </>
@@ -2055,36 +1880,57 @@ export default function HomeScreen() {
                   controlLayout === "split" && styles.primaryControlsSplit,
                 ]}
               >
-                <Pressable
-                  style={styles.button}
-                  onPress={() => moveShip(-1)}
-                  android_disableSound
-                >
-                  <Text style={styles.buttonText}>LEFT</Text>
-                </Pressable>
-
-                <Pressable
-                  style={[
-                    styles.fireButton,
-                    isFireHeld && styles.fireButtonActive,
-                  ]}
-                  onPressIn={handleFirePressIn}
-                  onPressOut={handleFirePressOut}
-                  onPress={() => {}}
-                  android_disableSound
-                >
-                  <Text style={styles.fireButtonText}>
-                    {isFireHeld ? "PULSE" : "FIRE"}
+                <View style={styles.joystickCluster}>
+                  <Text style={styles.swipeHintText}>
+                    SWIPE SCREEN TO MOVE LEFT AND RIGHT
                   </Text>
-                </Pressable>
+                  <View style={styles.joystickBase}>
+                    <Pressable
+                      style={[styles.joystickButton, styles.joystickButtonLeft]}
+                      onPress={() => moveShip(-1)}
+                      android_disableSound
+                    >
+                      <MaterialIcons
+                        name="chevron-left"
+                        size={28}
+                        color="#F3FAFF"
+                      />
+                    </Pressable>
+                    <View style={styles.joystickCenterRail} />
+                    <Pressable
+                      style={[
+                        styles.joystickButton,
+                        styles.joystickButtonRight,
+                      ]}
+                      onPress={() => moveShip(1)}
+                      android_disableSound
+                    >
+                      <MaterialIcons
+                        name="chevron-right"
+                        size={28}
+                        color="#F3FAFF"
+                      />
+                    </Pressable>
+                  </View>
+                </View>
 
-                <Pressable
-                  style={styles.button}
-                  onPress={() => moveShip(1)}
-                  android_disableSound
-                >
-                  <Text style={styles.buttonText}>RIGHT</Text>
-                </Pressable>
+                <View style={styles.fireCluster}>
+                  <Text style={styles.fireHintText}>HOLD FOR ALT ATTACK</Text>
+                  <Pressable
+                    style={[
+                      styles.fireButton,
+                      isFireHeld && styles.fireButtonActive,
+                    ]}
+                    onPressIn={handleFirePressIn}
+                    onPressOut={handleFirePressOut}
+                    onPress={() => {}}
+                    android_disableSound
+                  >
+                    <Text style={styles.fireButtonText}>
+                      {isFireHeld ? "PULSE" : "FIRE"}
+                    </Text>
+                  </Pressable>
+                </View>
               </View>
             </View>
           )}
@@ -2110,6 +1956,26 @@ const styles = StyleSheet.create({
     position: "absolute",
     backgroundColor: "#FFFFFF",
     borderRadius: 999,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  starGlow: {
+    position: "absolute",
+    width: "100%",
+    height: "100%",
+    borderRadius: 999,
+    backgroundColor: "rgba(192, 227, 255, 0.42)",
+    transform: [{ scale: 1.9 }],
+  },
+  nearStarGlow: {
+    backgroundColor: "rgba(224, 244, 255, 0.58)",
+    transform: [{ scale: 2.3 }],
+  },
+  starCore: {
+    width: "44%",
+    height: "44%",
+    borderRadius: 999,
+    backgroundColor: "#FFFFFF",
   },
   nearStar: {
     shadowColor: "#FFFFFF",
@@ -2151,79 +2017,94 @@ const styles = StyleSheet.create({
     flex: 1,
     alignItems: "center",
     justifyContent: "space-between",
-    paddingTop: 24,
-    paddingBottom: 12,
+    paddingTop: 16,
+    paddingBottom: 10,
+    gap: 10,
   },
   menuHeader: {
     alignItems: "center",
     zIndex: 2,
+    width: "100%",
+    paddingVertical: 14,
+    paddingHorizontal: 14,
+    borderWidth: 1,
+    borderColor: "#4CF0FF",
+    borderRadius: 6,
+    backgroundColor: "rgba(6, 10, 16, 0.82)",
+    shadowColor: "#4CF0FF",
+    shadowOpacity: 0.18,
+    shadowRadius: 12,
+    elevation: 5,
   },
   menuEyebrow: {
-    color: "#9ECFFF",
-    fontSize: 11,
-    fontWeight: "800",
-    letterSpacing: 2,
-    marginBottom: 12,
+    color: "#84E7FF",
+    fontSize: 10,
+    fontWeight: "900",
+    letterSpacing: 1.8,
+    marginBottom: 10,
   },
   menuTitle: {
-    color: "#F2F7FF",
-    fontSize: 38,
+    color: "#F9FBFF",
+    fontSize: 34,
     fontWeight: "900",
-    letterSpacing: 4,
+    letterSpacing: 5,
     textAlign: "center",
-    textShadowColor: "#5DC8FF",
-    textShadowRadius: 10,
-    lineHeight: 40,
+    textShadowColor: "#4CF0FF",
+    textShadowRadius: 8,
+    lineHeight: 36,
   },
   menuBlurb: {
-    color: "#C8D8EA",
-    fontSize: 13,
+    color: "#D0DDEA",
+    fontSize: 12,
     fontWeight: "600",
     textAlign: "center",
-    marginTop: 14,
-    maxWidth: 260,
-    lineHeight: 18,
+    marginTop: 12,
+    maxWidth: 240,
+    lineHeight: 16,
   },
   menuActions: {
     width: "100%",
-    gap: 10,
+    gap: 8,
     zIndex: 2,
+    paddingHorizontal: 4,
   },
   menuStartButton: {
-    borderWidth: 2,
-    borderColor: "#80F7B6",
-    backgroundColor: "#142118",
-    paddingVertical: 16,
+    borderWidth: 1.5,
+    borderColor: "#FF5C78",
+    backgroundColor: "#140C12",
+    paddingVertical: 11,
     alignItems: "center",
-    shadowColor: "#80F7B6",
-    shadowOpacity: 0.45,
-    shadowRadius: 10,
-    elevation: 8,
+    borderRadius: 4,
+    shadowColor: "#FF5C78",
+    shadowOpacity: 0.38,
+    shadowRadius: 8,
+    elevation: 6,
   },
   menuStartButtonText: {
-    color: "#D9FFE9",
-    fontSize: 18,
+    color: "#FFF3F5",
+    fontSize: 15,
     fontWeight: "900",
-    letterSpacing: 2,
+    letterSpacing: 1.6,
   },
   menuSecondaryButton: {
-    borderWidth: 2,
-    borderColor: "#4E6480",
-    backgroundColor: "#101622",
-    paddingVertical: 14,
+    borderWidth: 1.5,
+    borderColor: "#60728C",
+    backgroundColor: "#0D111A",
+    paddingVertical: 9,
     alignItems: "center",
+    borderRadius: 4,
   },
   menuSecondaryButtonText: {
-    color: "#DFE7F0",
-    fontSize: 15,
+    color: "#EAF2FF",
+    fontSize: 13,
     fontWeight: "800",
-    letterSpacing: 1.5,
+    letterSpacing: 1.1,
   },
   menuShipStage: {
     width: "100%",
     alignItems: "center",
     justifyContent: "flex-end",
-    paddingBottom: 12,
+    paddingBottom: 6,
     zIndex: 2,
   },
   menuPanel: {
@@ -2232,45 +2113,88 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     gap: 12,
     zIndex: 2,
+    borderWidth: 1,
+    borderColor: "#46607A",
+    borderRadius: 6,
+    backgroundColor: "rgba(7, 11, 17, 0.72)",
+    paddingHorizontal: 14,
+    paddingVertical: 12,
   },
   menuPanelTitle: {
-    color: "#F0F7FF",
-    fontSize: 28,
+    color: "#F5F9FF",
+    fontSize: 24,
     fontWeight: "900",
-    letterSpacing: 2.5,
+    letterSpacing: 2,
     textAlign: "center",
-    marginBottom: 8,
+    marginBottom: 4,
   },
   menuPanelBody: {
     color: "#C7D4E5",
-    fontSize: 18,
+    fontSize: 15,
     fontWeight: "700",
     textAlign: "center",
-    letterSpacing: 1.2,
-    marginBottom: 10,
+    letterSpacing: 0.8,
+    marginBottom: 8,
+  },
+  menuHangarPreview: {
+    width: "100%",
+    gap: 10,
+    marginBottom: 4,
+  },
+  menuHangarShipCard: {
+    width: "100%",
+    borderWidth: 1,
+    backgroundColor: "rgba(12, 20, 34, 0.92)",
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    alignItems: "center",
+    gap: 4,
+  },
+  menuHangarShipName: {
+    color: "#F4FAFF",
+    fontSize: 15,
+    fontWeight: "900",
+    letterSpacing: 1,
+    textAlign: "center",
+  },
+  menuHangarShipWeapon: {
+    color: "#B8D0E7",
+    fontSize: 11,
+    fontWeight: "700",
+    letterSpacing: 0.9,
+    textAlign: "center",
+  },
+  menuHangarHint: {
+    color: "#93B5D2",
+    fontSize: 11,
+    fontWeight: "700",
+    letterSpacing: 0.9,
+    textAlign: "center",
+    marginBottom: 4,
   },
   menuBackButton: {
-    borderWidth: 2,
+    borderWidth: 1.5,
     borderColor: "#7D95B5",
-    backgroundColor: "#141D2D",
-    paddingVertical: 14,
+    backgroundColor: "#121A29",
+    paddingVertical: 9,
     alignItems: "center",
     marginTop: 6,
+    borderRadius: 4,
   },
   menuBackButtonText: {
     color: "#EBF2FB",
-    fontSize: 15,
+    fontSize: 13,
     fontWeight: "800",
-    letterSpacing: 1.4,
+    letterSpacing: 1.1,
   },
   versionFooter: {
     position: "absolute",
     left: 2,
     bottom: 0,
     color: "#8FA5BF",
-    fontSize: 10,
+    fontSize: 9,
     fontWeight: "700",
-    letterSpacing: 0.8,
+    letterSpacing: 0.6,
     zIndex: 3,
   },
   creditsScroll: {
@@ -2286,7 +2210,7 @@ const styles = StyleSheet.create({
     backgroundColor: "rgba(12, 20, 34, 0.9)",
     paddingHorizontal: 18,
     paddingVertical: 20,
-    borderRadius: 16,
+    borderRadius: 6,
     shadowColor: "#69C7FF",
     shadowOpacity: 0.14,
     shadowRadius: 14,
@@ -2391,7 +2315,7 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "center",
-    marginBottom: 10,
+    marginBottom: 6,
     zIndex: 2,
   },
   hudBlock: {
@@ -2403,21 +2327,21 @@ const styles = StyleSheet.create({
   },
   hudText: {
     color: "#FFFFFF",
-    fontSize: 18,
+    fontSize: 15,
     fontWeight: "800",
-    letterSpacing: 1.1,
+    letterSpacing: 0.9,
   },
   hudSubtext: {
     color: "#96BFEA",
-    fontSize: 11,
+    fontSize: 9,
     fontWeight: "700",
-    letterSpacing: 1.3,
+    letterSpacing: 1,
   },
   statusMeters: {
     flexDirection: "row",
     justifyContent: "space-between",
-    gap: 12,
-    marginBottom: 14,
+    gap: 8,
+    marginBottom: 10,
     zIndex: 2,
   },
   statusMeter: {
@@ -2425,23 +2349,23 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: "#2F4662",
     backgroundColor: "rgba(8, 14, 24, 0.7)",
-    paddingHorizontal: 10,
-    paddingVertical: 8,
+    paddingHorizontal: 8,
+    paddingVertical: 6,
   },
   statusMeterLabel: {
     color: "#D4E6FB",
-    fontSize: 11,
+    fontSize: 9,
     fontWeight: "800",
-    letterSpacing: 1.4,
-    marginBottom: 6,
+    letterSpacing: 1.1,
+    marginBottom: 4,
   },
   statusBarRow: {
     flexDirection: "row",
-    gap: 6,
+    gap: 4,
   },
   statusBar: {
     flex: 1,
-    height: 12,
+    height: 8,
     borderRadius: 4,
     borderWidth: 1,
   },
@@ -2466,38 +2390,38 @@ const styles = StyleSheet.create({
   },
   titleWrap: {
     alignItems: "center",
-    marginBottom: 18,
+    marginBottom: 10,
     zIndex: 2,
   },
   title: {
     color: "#F2F7FF",
-    fontSize: 28,
+    fontSize: 24,
     fontWeight: "800",
-    letterSpacing: 2,
+    letterSpacing: 1.6,
     textAlign: "center",
   },
   subtitle: {
     color: "#9FC7FF",
-    fontSize: 11,
+    fontSize: 9,
     fontWeight: "700",
-    letterSpacing: 2,
-    marginTop: 6,
+    letterSpacing: 1.5,
+    marginTop: 4,
   },
   menuReturnButton: {
     alignSelf: "flex-start",
     borderWidth: 1,
     borderColor: "#89B8E7",
     backgroundColor: "#0C1421",
-    paddingVertical: 6,
-    paddingHorizontal: 12,
-    marginBottom: 8,
+    paddingVertical: 4,
+    paddingHorizontal: 10,
+    marginBottom: 6,
     zIndex: 2,
   },
   menuReturnButtonText: {
     color: "#DCE9F7",
-    fontSize: 12,
+    fontSize: 10,
     fontWeight: "800",
-    letterSpacing: 1,
+    letterSpacing: 0.8,
   },
   playArea: {
     flex: 1,
@@ -2528,21 +2452,21 @@ const styles = StyleSheet.create({
   },
   enemyGlow: {
     position: "absolute",
-    bottom: 4,
+    bottom: 0,
     width: ENEMY_FRAME_WIDTH,
-    height: 16,
-    borderRadius: 999,
-    opacity: 0.55,
+    height: 22,
+    alignItems: "center",
+    justifyContent: "center",
   },
   enemyGlowBoss: {
-    backgroundColor: "#FFB86E",
+    opacity: 0.9,
     shadowColor: "#FFB86E",
-    shadowOpacity: 0.95,
-    shadowRadius: 18,
-    elevation: 12,
+    shadowOpacity: 0.9,
+    shadowRadius: 14,
+    elevation: 10,
   },
   enemyGlowGrunt: {
-    backgroundColor: "#FF5C78",
+    opacity: 0.88,
     shadowColor: "#FF5C78",
     shadowOpacity: 0.8,
     shadowRadius: 10,
@@ -2555,66 +2479,110 @@ const styles = StyleSheet.create({
   asteroidShell: {
     width: ASTEROID_FRAME_SIZE,
     height: ASTEROID_FRAME_SIZE,
-    borderRadius: 28,
-    backgroundColor: "#8D6C54",
+    borderRadius: 34,
+    backgroundColor: "#7A6656",
     borderWidth: 3,
-    borderColor: "#C8AA8C",
+    borderColor: "#B7A08B",
     alignItems: "center",
     justifyContent: "center",
-    shadowColor: "#E3A671",
-    shadowOpacity: 0.35,
-    shadowRadius: 10,
+    overflow: "hidden",
+    shadowColor: "#B48662",
+    shadowOpacity: 0.28,
+    shadowRadius: 12,
     elevation: 8,
+  },
+  asteroidShadow: {
+    position: "absolute",
+    right: -8,
+    bottom: -6,
+    width: 48,
+    height: 54,
+    borderRadius: 24,
+    backgroundColor: "rgba(55, 40, 31, 0.4)",
+  },
+  asteroidHighlight: {
+    position: "absolute",
+    top: 8,
+    left: 10,
+    width: 34,
+    height: 16,
+    borderRadius: 999,
+    backgroundColor: "rgba(235, 215, 195, 0.32)",
+    transform: [{ rotate: "-18deg" }],
+  },
+  asteroidRidge: {
+    position: "absolute",
+    top: 28,
+    left: 8,
+    width: 56,
+    height: 18,
+    borderRadius: 14,
+    backgroundColor: "rgba(158, 128, 104, 0.34)",
+    transform: [{ rotate: "-24deg" }],
   },
   asteroidFacetA: {
     position: "absolute",
-    top: 10,
-    left: 12,
-    width: 24,
-    height: 18,
-    borderRadius: 10,
-    backgroundColor: "#B98D6C",
-    opacity: 0.75,
-    transform: [{ rotate: "-16deg" }],
+    top: 14,
+    left: 14,
+    width: 22,
+    height: 16,
+    borderRadius: 9,
+    backgroundColor: "#A98A72",
+    opacity: 0.72,
+    transform: [{ rotate: "-18deg" }],
   },
   asteroidFacetB: {
     position: "absolute",
     right: 10,
-    top: 20,
-    width: 18,
-    height: 14,
+    top: 18,
+    width: 20,
+    height: 16,
     borderRadius: 8,
-    backgroundColor: "#6F533F",
+    backgroundColor: "#5F4B3D",
     opacity: 0.8,
-    transform: [{ rotate: "22deg" }],
+    transform: [{ rotate: "24deg" }],
   },
   asteroidFacetC: {
     position: "absolute",
-    left: 18,
+    left: 20,
     bottom: 12,
-    width: 22,
-    height: 16,
+    width: 24,
+    height: 18,
     borderRadius: 10,
-    backgroundColor: "#6B4C38",
-    opacity: 0.7,
-    transform: [{ rotate: "14deg" }],
+    backgroundColor: "#5D4738",
+    opacity: 0.74,
+    transform: [{ rotate: "16deg" }],
   },
   asteroidCraterLarge: {
-    width: 24,
-    height: 24,
+    width: 26,
+    height: 26,
     borderRadius: 999,
-    backgroundColor: "#5E4434",
-    opacity: 0.7,
-    transform: [{ translateX: 8 }, { translateY: 4 }],
+    backgroundColor: "#564133",
+    borderWidth: 1,
+    borderColor: "rgba(176, 145, 120, 0.22)",
+    opacity: 0.78,
+    transform: [{ translateX: 10 }, { translateY: 6 }],
+  },
+  asteroidCraterMedium: {
+    position: "absolute",
+    right: 16,
+    bottom: 18,
+    width: 14,
+    height: 14,
+    borderRadius: 999,
+    backgroundColor: "#4C392D",
+    borderWidth: 1,
+    borderColor: "rgba(152, 126, 104, 0.16)",
+    opacity: 0.78,
   },
   asteroidCraterSmall: {
     position: "absolute",
-    left: 18,
-    top: 18,
+    left: 16,
+    top: 20,
     width: 10,
     height: 10,
     borderRadius: 999,
-    backgroundColor: "#4C372A",
+    backgroundColor: "#433126",
     opacity: 0.78,
   },
   enemyGlowRed: {
@@ -2752,8 +2720,71 @@ const styles = StyleSheet.create({
   bulletLayer: {
     ...StyleSheet.absoluteFillObject,
   },
+  enemyLaserLayer: {
+    ...StyleSheet.absoluteFillObject,
+  },
   explosionLayer: {
     ...StyleSheet.absoluteFillObject,
+  },
+  enemyLaserBeam: {
+    position: "absolute",
+    alignItems: "center",
+    borderRadius: 999,
+    overflow: "hidden",
+  },
+  enemyLaserBeamTelegraph: {
+    backgroundColor: "rgba(255, 92, 122, 0.28)",
+    borderWidth: 2,
+    borderColor: "rgba(255, 186, 198, 0.68)",
+  },
+  enemyLaserBeamActive: {
+    backgroundColor: "rgba(255, 42, 74, 0.56)",
+    shadowColor: "#FF4A6F",
+    shadowOpacity: 1,
+    shadowRadius: 24,
+    elevation: 14,
+  },
+  enemyLaserAura: {
+    position: "absolute",
+    top: 0,
+    width: "100%",
+    height: "100%",
+    borderRadius: 999,
+  },
+  enemyLaserAuraTelegraph: {
+    backgroundColor: "rgba(255, 120, 146, 0.16)",
+  },
+  enemyLaserAuraActive: {
+    backgroundColor: "rgba(255, 82, 110, 0.24)",
+  },
+  enemyLaserEmitter: {
+    position: "absolute",
+    top: 0,
+    width: 122,
+    height: 34,
+    borderRadius: 999,
+  },
+  enemyLaserEmitterTelegraph: {
+    backgroundColor: "rgba(255, 170, 186, 0.32)",
+  },
+  enemyLaserEmitterActive: {
+    backgroundColor: "rgba(255, 126, 148, 0.66)",
+    shadowColor: "#FF6E8C",
+    shadowOpacity: 1,
+    shadowRadius: 16,
+    elevation: 10,
+  },
+  enemyLaserCore: {
+    width: 16,
+    height: "100%",
+    borderRadius: 999,
+  },
+  enemyLaserCoreTelegraph: {
+    backgroundColor: "rgba(255, 226, 232, 0.62)",
+  },
+  enemyLaserCoreActive: {
+    width: 24,
+    backgroundColor: "#FFE7EB",
   },
   bulletShell: {
     position: "absolute",
@@ -2829,9 +2860,9 @@ const styles = StyleSheet.create({
   },
   playerShipShadow: {
     position: "absolute",
-    bottom: 18,
-    width: 132,
-    height: 18,
+    bottom: 14,
+    width: 104,
+    height: 14,
     borderRadius: 999,
     backgroundColor: "rgba(8, 14, 24, 0.48)",
   },
@@ -2839,36 +2870,108 @@ const styles = StyleSheet.create({
     opacity: 0.82,
   },
   playerShipSvgImage: {
-    width: SHIP_FRAME_WIDTH - 18,
-    height: SHIP_FRAME_HEIGHT - 4,
+    width: SHIP_FRAME_WIDTH - 40,
+    height: SHIP_FRAME_HEIGHT - 32,
   },
   playerShipImage: {
-    width: SHIP_FRAME_WIDTH - 18,
-    height: SHIP_FRAME_HEIGHT - 4,
+    width: SHIP_FRAME_WIDTH - 40,
+    height: SHIP_FRAME_HEIGHT - 32,
   },
-  playerEngineGlowOuter: {
+  playerEngineFlameCluster: {
     position: "absolute",
-    bottom: 18,
+    bottom: -8,
+    width: 38,
+    height: 88,
+    alignItems: "center",
+    justifyContent: "flex-end",
+    opacity: 0.86,
+  },
+  playerEngineFlameClusterBoosting: {
+    bottom: -26,
     width: 56,
-    height: 44,
-    borderRadius: 999,
-    backgroundColor: "#2FA4FF",
-    shadowColor: "#38B2FF",
-    shadowOpacity: 0.9,
-    shadowRadius: 14,
-    elevation: 10,
+    height: 138,
+    opacity: 1,
   },
-  playerEngineGlowInner: {
+  playerEngineFlameGlow: {
     position: "absolute",
-    bottom: 24,
-    width: 26,
-    height: 20,
+    bottom: 6,
+    width: 24,
+    height: 18,
     borderRadius: 999,
-    backgroundColor: "#D2F4FF",
-    shadowColor: "#A2EDFF",
-    shadowOpacity: 0.85,
-    shadowRadius: 10,
-    elevation: 8,
+    backgroundColor: "rgba(88, 198, 255, 0.42)",
+    shadowColor: "#59C7FF",
+    shadowOpacity: 0.55,
+    shadowRadius: 8,
+    elevation: 5,
+  },
+  playerEngineFlameGlowBoosting: {
+    bottom: 0,
+    width: 36,
+    height: 26,
+    backgroundColor: "rgba(146, 228, 255, 0.68)",
+    shadowOpacity: 0.9,
+    shadowRadius: 12,
+    elevation: 9,
+  },
+  playerEngineFlameLeft: {
+    position: "absolute",
+    bottom: 0,
+    left: 0,
+    width: 0,
+    height: 0,
+    borderLeftWidth: 6,
+    borderRightWidth: 6,
+    borderTopWidth: 28,
+    borderLeftColor: "transparent",
+    borderRightColor: "transparent",
+    borderTopColor: "#57D3FF",
+    transform: [{ rotate: "-14deg" }],
+  },
+  playerEngineFlameLeftBoosting: {
+    borderLeftWidth: 8,
+    borderRightWidth: 8,
+    borderTopWidth: 46,
+    borderTopColor: "#A7EDFF",
+    transform: [{ rotate: "-18deg" }],
+  },
+  playerEngineFlameCenter: {
+    position: "absolute",
+    bottom: 0,
+    width: 0,
+    height: 0,
+    borderLeftWidth: 7,
+    borderRightWidth: 7,
+    borderTopWidth: 36,
+    borderLeftColor: "transparent",
+    borderRightColor: "transparent",
+    borderTopColor: "#D7F8FF",
+  },
+  playerEngineFlameCenterBoosting: {
+    borderLeftWidth: 10,
+    borderRightWidth: 10,
+    borderTopWidth: 66,
+    borderTopColor: "#FFFFFF",
+  },
+  playerEngineFlameRight: {
+    position: "absolute",
+    bottom: 0,
+    right: 0,
+    width: 0,
+    height: 0,
+    borderLeftWidth: 6,
+    borderRightWidth: 6,
+    borderTopWidth: 28,
+    borderLeftColor: "transparent",
+    borderRightColor: "transparent",
+    borderTopColor: "#57D3FF",
+    transform: [{ rotate: "14deg" }],
+  },
+  playerEngineFlameRightBoosting: {
+    borderLeftWidth: 8,
+    borderRightWidth: 8,
+    borderTopWidth: 46,
+    borderTopColor: "#A7EDFF",
+    transform: [{ rotate: "18deg" }],
   },
   playerWingShadow: {
     position: "absolute",
@@ -3472,30 +3575,48 @@ const styles = StyleSheet.create({
   },
   milkyWayBand: {
     position: "absolute",
-    top: 84,
-    left: -180,
-    width: 760,
-    height: 190,
+    top: 78,
+    left: -260,
+    width: 980,
+    height: 240,
     borderRadius: 999,
-    backgroundColor: "rgba(126, 150, 248, 0.09)",
+    backgroundColor: "rgba(96, 126, 226, 0.12)",
+  },
+  milkyWayCore: {
+    position: "absolute",
+    top: 112,
+    left: -210,
+    width: 920,
+    height: 110,
+    borderRadius: 999,
+    backgroundColor: "rgba(244, 238, 255, 0.18)",
+  },
+  milkyWayDustLane: {
+    position: "absolute",
+    top: 146,
+    left: -250,
+    width: 950,
+    height: 48,
+    borderRadius: 999,
+    backgroundColor: "rgba(34, 42, 92, 0.22)",
   },
   milkyWayBandEcho: {
     position: "absolute",
-    top: 130,
-    left: -210,
-    width: 760,
-    height: 140,
+    top: 148,
+    left: -280,
+    width: 920,
+    height: 176,
     borderRadius: 999,
-    backgroundColor: "rgba(82, 110, 216, 0.05)",
+    backgroundColor: "rgba(82, 112, 210, 0.1)",
   },
   milkyWayGlow: {
     position: "absolute",
-    top: 130,
-    left: -120,
-    width: 680,
-    height: 124,
+    top: 104,
+    left: -190,
+    width: 860,
+    height: 168,
     borderRadius: 999,
-    backgroundColor: "rgba(206, 176, 255, 0.08)",
+    backgroundColor: "rgba(222, 212, 255, 0.14)",
   },
   spaceHazeA: {
     position: "absolute",
@@ -3543,9 +3664,41 @@ const styles = StyleSheet.create({
     right: -26,
     width: 104,
     height: 104,
-    borderRadius: 999,
+    borderRadius: 52,
     backgroundColor: "#253A73",
-    opacity: 0.54,
+    opacity: 0.62,
+    overflow: "hidden",
+    borderWidth: 1,
+    borderColor: "rgba(154, 178, 255, 0.18)",
+  },
+  distantPlanetShadow: {
+    position: "absolute",
+    right: -10,
+    bottom: -2,
+    width: 68,
+    height: 68,
+    borderRadius: 34,
+    backgroundColor: "rgba(11, 19, 47, 0.42)",
+  },
+  distantPlanetRing: {
+    position: "absolute",
+    top: 28,
+    left: -6,
+    width: 92,
+    height: 22,
+    borderRadius: 999,
+    backgroundColor: "rgba(110, 136, 226, 0.22)",
+    transform: [{ rotate: "-18deg" }],
+  },
+  distantPlanetCap: {
+    position: "absolute",
+    top: 14,
+    left: 18,
+    width: 34,
+    height: 18,
+    borderRadius: 999,
+    backgroundColor: "rgba(202, 221, 255, 0.18)",
+    transform: [{ rotate: "-16deg" }],
   },
   distantPlanetGlow: {
     position: "absolute",
@@ -3553,7 +3706,7 @@ const styles = StyleSheet.create({
     right: -40,
     width: 138,
     height: 138,
-    borderRadius: 999,
+    borderRadius: 69,
     backgroundColor: "rgba(76, 105, 206, 0.08)",
   },
   distantMoon: {
@@ -3562,7 +3715,7 @@ const styles = StyleSheet.create({
     left: 14,
     width: 34,
     height: 34,
-    borderRadius: 999,
+    borderRadius: 17,
     backgroundColor: "rgba(235, 241, 255, 0.58)",
   },
   asteroidClusterA: {
@@ -3652,7 +3805,7 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "flex-end",
     justifyContent: "space-between",
-    gap: 12,
+    gap: 8,
     zIndex: 3,
   },
   controlsDockSplit: {
@@ -3661,74 +3814,152 @@ const styles = StyleSheet.create({
     gap: 10,
   },
   boostControl: {
-    width: 86,
-    minHeight: 92,
-    borderWidth: 2,
-    borderColor: "#70FFB8",
-    backgroundColor: "#101A12",
-    paddingVertical: 12,
-    paddingHorizontal: 10,
+    width: 72,
+    height: 72,
+    borderWidth: 1.5,
+    borderColor: "#69C7FF",
+    backgroundColor: "rgba(10, 18, 30, 0.9)",
+    paddingVertical: 6,
+    paddingHorizontal: 6,
     alignItems: "center",
-    justifyContent: "space-between",
+    justifyContent: "center",
+    borderRadius: 999,
+    overflow: "hidden",
+    shadowColor: "#69C7FF",
+    shadowOpacity: 0.22,
+    shadowRadius: 10,
+    elevation: 7,
   },
   boostControlActive: {
-    backgroundColor: "#173025",
-    shadowColor: "#70FFB8",
+    backgroundColor: "rgba(14, 28, 48, 0.98)",
+    shadowColor: "#7FE0FF",
     shadowOpacity: 0.7,
-    shadowRadius: 12,
+    shadowRadius: 14,
     elevation: 10,
   },
   boostLabel: {
-    color: "#C8FFD6",
-    fontSize: 15,
+    color: "#D9F2FF",
+    fontSize: 10,
     fontWeight: "900",
-    letterSpacing: 1,
+    letterSpacing: 1.1,
+    marginBottom: 3,
   },
   boostMeter: {
-    width: 18,
-    height: 44,
-    borderWidth: 2,
-    borderColor: "#8CEAC1",
-    backgroundColor: "#07120B",
-    justifyContent: "flex-end",
+    width: 28,
+    height: 28,
+    borderWidth: 1.5,
+    borderColor: "rgba(137, 197, 255, 0.95)",
+    backgroundColor: "rgba(6, 12, 22, 0.95)",
+    justifyContent: "center",
+    alignItems: "center",
     padding: 2,
+    borderRadius: 999,
   },
   boostMeterFill: {
-    height: 10,
-    backgroundColor: "#3F8D5F",
+    width: 8,
+    height: 8,
+    borderRadius: 999,
+    backgroundColor: "#59B8FF",
   },
   boostMeterFillActive: {
-    height: 34,
-    backgroundColor: "#8BFFD1",
+    width: 16,
+    height: 16,
+    backgroundColor: "#D7FAFF",
   },
   primaryControls: {
     flex: 1,
     flexDirection: "row",
+    alignItems: "flex-end",
     justifyContent: "space-between",
-    gap: 10,
+    gap: 8,
   },
   primaryControlsSplit: {
     flex: 0,
   },
-  button: {
+  joystickCluster: {
     flex: 1,
-    borderWidth: 2,
-    borderColor: "#FFFFFF",
-    backgroundColor: "#111111",
-    paddingVertical: 15,
+    justifyContent: "flex-end",
+  },
+  swipeHintText: {
+    color: "#C3DBEE",
+    fontSize: 7,
+    fontWeight: "800",
+    letterSpacing: 0.8,
+    marginBottom: 4,
+    marginLeft: 6,
+    textAlign: "left",
+  },
+  joystickBase: {
+    minHeight: 72,
+    borderWidth: 1,
+    borderColor: "rgba(205, 227, 255, 0.24)",
+    backgroundColor: "rgba(11, 18, 28, 0.5)",
+    borderRadius: 999,
+    flexDirection: "row",
     alignItems: "center",
+    justifyContent: "space-between",
+    paddingHorizontal: 8,
+    paddingVertical: 6,
+    overflow: "hidden",
+  },
+  joystickButton: {
+    width: 52,
+    height: 52,
+    borderRadius: 999,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "rgba(14, 22, 35, 0.56)",
+    borderWidth: 1,
+    borderColor: "rgba(160, 210, 255, 0.42)",
+    opacity: 0.78,
+  },
+  joystickButtonLeft: {
+    shadowColor: "#8FD4FF",
+    shadowOpacity: 0.18,
+    shadowRadius: 8,
+    elevation: 4,
+  },
+  joystickButtonRight: {
+    shadowColor: "#8FD4FF",
+    shadowOpacity: 0.18,
+    shadowRadius: 8,
+    elevation: 4,
+  },
+  joystickCenterRail: {
+    flex: 1,
+    height: 2,
+    marginHorizontal: 6,
+    borderRadius: 999,
+    backgroundColor: "rgba(168, 217, 255, 0.18)",
+  },
+  fireCluster: {
+    width: 94,
+    alignItems: "flex-end",
+    justifyContent: "flex-end",
+    marginLeft: 0,
+    marginBottom: 36,
+  },
+  fireHintText: {
+    color: "#B7D7F2",
+    fontSize: 7,
+    fontWeight: "800",
+    letterSpacing: 0.9,
+    marginBottom: 3,
+    textAlign: "right",
   },
   fireButton: {
-    flex: 1,
-    borderWidth: 2,
+    width: 72,
+    height: 72,
+    borderWidth: 1.5,
     borderColor: "#8ED4FF",
     backgroundColor: "#0D1824",
-    paddingVertical: 15,
     alignItems: "center",
+    justifyContent: "center",
     shadowColor: "#61C8FF",
     shadowOpacity: 0.35,
     shadowRadius: 8,
     elevation: 6,
+    borderRadius: 999,
   },
   fireButtonActive: {
     backgroundColor: "#16345A",
@@ -3745,8 +3976,9 @@ const styles = StyleSheet.create({
   },
   fireButtonText: {
     color: "#DDF6FF",
-    fontSize: 14,
+    fontSize: 10,
     fontWeight: "900",
-    letterSpacing: 1,
+    letterSpacing: 0.9,
+    textAlign: "center",
   },
 });
