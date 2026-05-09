@@ -1,11 +1,11 @@
 {
   "expo": {
-    "name": "my-first-app",
-    "slug": "my-first-app",
+    "name": "Voxium invaders",
+    "slug": "voxium-invaders",
     "version": "0.1.11",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
-    "scheme": "myfirstapp",
+    "scheme": "voxiuminvaders",
     "userInterfaceStyle": "automatic",
 
     "ios": {
