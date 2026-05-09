@@ -1,5 +1,5 @@
 {
-  "name": "my-first-app",
+  "name": "voxium-invaders",
   "main": "expo-router/entry",
   "version": "0.1.11",
   "scripts": {
