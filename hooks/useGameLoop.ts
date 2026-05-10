@@ -1,5 +1,5 @@
 import { useEffect } from 'react';
-import type { AudioPlayer } from 'expo-audio';
+import { Audio } from 'expo-av';
 
 import {
   applyPlayerDamage,
@@ -46,7 +46,7 @@ import {
   shouldLaunchBossLaser,
 } from '@/components/game/game-enemy-system';
 import { getBossSpawnThreshold, getNextEnemySpawnDelay } from '@/components/game/game-stage';
-import { playSoundSafely, resetSoundSafely } from '@/components/game/game-audio';
+import { playSoundSafely, resetSoundSafely } from '../components/game/game-audio.native';
 
 type MutableNumberRef = { current: number };
 type MutableBooleanRef = { current: boolean };
@@ -56,16 +56,16 @@ type MutableSceneRef = { current: SceneState };
 type UseGameLoopArgs = {
   bossLaserIdRef: MutableNumberRef;
   explosionIdRef: MutableNumberRef;
-  bossPlayer: AudioPlayer;
-  boostPlayer: AudioPlayer;
+  bossPlayer: Audio.Sound | null;
+  boostPlayer: Audio.Sound | null;
   boostRef: MutableBooleanRef;
   bulletIdRef: MutableNumberRef;
   contentWidthRef: MutableNumberRef;
-  destroyPlayer: AudioPlayer;
+  destroyPlayer: Audio.Sound | null;
   enemyIdRef: MutableNumberRef;
   enemySpawnClockRef: MutableNumberRef;
   fireHoldStartAtRef: MutableNumberRef;
-  firePlayer: AudioPlayer;
+  firePlayer: Audio.Sound | null;
   gameState: GameState;
   gameStateRef: MutableGameStateRef;
   heightRef: MutableNumberRef;
@@ -78,7 +78,7 @@ type UseGameLoopArgs = {
   playAreaHeightRef: MutableNumberRef;
   pulseChargeMs: number;
   pulseModeRef: MutableBooleanRef;
-  pulsePlayer: AudioPlayer;
+  pulsePlayer: Audio.Sound | null;
   scene: SceneState;
   sceneRef: MutableSceneRef;
   setGameState: React.Dispatch<React.SetStateAction<GameState>>;
@@ -88,7 +88,7 @@ type UseGameLoopArgs = {
   setScene: React.Dispatch<React.SetStateAction<SceneState>>;
   shipOffsetRef: MutableNumberRef;
   standardFireCooldownMs: number;
-  wavePlayer: AudioPlayer;
+  wavePlayer: Audio.Sound | null;
 };
 
 export function useGameLoop({
@@ -301,6 +301,11 @@ export function useGameLoop({
                   bossLaserIdRef.current++,
                   clamp(shipOffsetRef.current, -maxShipOffset, maxShipOffset),
                   getBossLaserOriginY(advancedEnemy, nextElapsedMs),
+                  currentStage >= 3
+                    ? 'stage3'
+                    : currentStage === 2
+                      ? 'stage2'
+                      : 'stage1',
                 ),
               );
               advancedEnemy.fireClockMs = 0;

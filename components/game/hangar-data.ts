@@ -18,6 +18,8 @@ export type HangarShip = {
     speed: number;
     armor: number;
     firepower: number;
+    hp: number;
+    shield: number;
   };
 };
 
@@ -46,6 +48,8 @@ export const HANGAR_SHIPS: HangarShip[] = [
       speed: 68,
       armor: 60,
       firepower: 60,
+      hp: 5,
+      shield: 3,
     },
   },
   {
@@ -68,6 +72,8 @@ export const HANGAR_SHIPS: HangarShip[] = [
       speed: 76,
       armor: 66,
       firepower: 68,
+      hp: 6,
+      shield: 3,
     },
   },
   {
@@ -90,6 +96,8 @@ export const HANGAR_SHIPS: HangarShip[] = [
       speed: 80,
       armor: 72,
       firepower: 74,
+      hp: 6,
+      shield: 4,
     },
   },
   {
@@ -112,6 +120,8 @@ export const HANGAR_SHIPS: HangarShip[] = [
       speed: 88,
       armor: 78,
       firepower: 80,
+      hp: 7,
+      shield: 4,
     },
   },
   {
@@ -134,6 +144,8 @@ export const HANGAR_SHIPS: HangarShip[] = [
       speed: 62,
       armor: 84,
       firepower: 88,
+      hp: 7,
+      shield: 5,
     },
   },
   {
@@ -156,6 +168,8 @@ export const HANGAR_SHIPS: HangarShip[] = [
       speed: 54,
       armor: 92,
       firepower: 84,
+      hp: 8,
+      shield: 5,
     },
   },
   {
@@ -178,6 +192,8 @@ export const HANGAR_SHIPS: HangarShip[] = [
       speed: 48,
       armor: 96,
       firepower: 94,
+      hp: 8,
+      shield: 6,
     },
   },
   {
@@ -200,6 +216,8 @@ export const HANGAR_SHIPS: HangarShip[] = [
       speed: 72,
       armor: 100,
       firepower: 98,
+      hp: 9,
+      shield: 6,
     },
   },
 ];

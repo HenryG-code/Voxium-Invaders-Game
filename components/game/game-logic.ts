@@ -18,7 +18,10 @@ const HELIOS_SHIP_IMAGE = require('../../assets/images/Helios.png') as ImageSour
 const BASTION_SHIP_IMAGE = require('../../assets/images/Bastion.png') as ImageSourcePropType;
 const ATLAS_SHIP_IMAGE = require('../../assets/images/Atlas.png') as ImageSourcePropType;
 const NOVA_SHIP_IMAGE = require('../../assets/images/Nova.png') as ImageSourcePropType;
+const ASTERLARGE_MODEL_IMAGE = require('../../assets/images/asterlarge.png') as ImageSourcePropType;
+const ASTERLARGE2_MODEL_IMAGE = require('../../assets/images/asterlarge2.png') as ImageSourcePropType;
 const BOSS_STAGE_TWO_MODEL_IMAGE = require('../../assets/images/Boss2.png') as ImageSourcePropType;
+const BOSS_STAGE_THREE_MODEL_IMAGE = require('../../assets/images/Boss3.png') as ImageSourcePropType;
 export const PLAYER_SHIP_IMAGE = WARDEN_SHIP_IMAGE;
 export const ENEMY_MODEL_IMAGE = require('../../assets/images/Enemy1.png') as ImageSourcePropType;
 export const ENEMY_STAGE_TWO_MODEL_IMAGE = require('../../assets/images/Enemy2.png') as ImageSourcePropType;
@@ -27,6 +30,7 @@ export const PLAY_AREA_BOTTOM_PADDING = 18;
 
 export const BOSS_STAGE = 1;
 export const BOSS_HP = 18;
+export const BOSS_STAGE_THREE_HP = BOSS_HP * 2;
 
 export const FAR_STAR_COUNT = 36;
 export const MID_STAR_COUNT = 32;
@@ -64,7 +68,7 @@ export const NOVA_PULSE_BULLET_WIDTH = 8;
 export const NOVA_PULSE_BULLET_HEIGHT = 28;
 export const ENEMY_FRAME_WIDTH = 126;
 export const ENEMY_FRAME_HEIGHT = 69;
-export const ASTEROID_FRAME_SIZE = 84;
+export const ASTEROID_FRAME_SIZE = 112;
 export const TOUCH_CONTROL_HEIGHT = 120;
 export const SHIP_COLLISION_HEIGHT = 30;
 export const MAX_SHIELD_POINTS = 3;
@@ -78,6 +82,7 @@ export type StarLayer = 'far' | 'mid' | 'near';
 export type MenuPanel = 'main' | 'options' | 'hangar' | 'credits' | 'records';
 export type ControlLayout = 'classic' | 'split';
 export type EnemyKind = 'grunt' | 'boss' | 'asteroid';
+export type BossLaserKind = 'stage1' | 'stage2' | 'stage3';
 export type BulletKind =
   | 'standard'
   | 'pulse'
@@ -88,7 +93,13 @@ export type BulletKind =
   | 'plasmaPellet'
   | 'seekerPod'
   | 'novaPulse';
-export type EnemyVisualVariant = 'enemy1' | 'enemy2' | 'boss2';
+export type EnemyVisualVariant =
+  | 'enemy1'
+  | 'enemy2'
+  | 'boss2'
+  | 'boss3'
+  | 'asterlarge'
+  | 'asterlarge2';
 
 export type FlightStar = {
   id: number;
@@ -113,11 +124,16 @@ export type Bullet = {
   x: number;
   y: number;
   kind: BulletKind;
+  sourceShipId?: string;
   vx?: number;
   damage?: number;
   ageMs?: number;
   maxAgeMs?: number;
   pierce?: number;
+  blastRadius?: number;
+  beamTickMs?: number;
+  lastBeamHitMs?: number;
+  beamLength?: number;
 };
 
 export type Enemy = {
@@ -131,9 +147,21 @@ export type Enemy = {
   kind: EnemyKind;
   modelVariant: EnemyVisualVariant;
   hp: number;
+  maxHp: number;
   fireClockMs: number;
   fireCooldownMs: number;
   hitFlashMs: number;
+  frozenUntilMs?: number;
+  frozenCenterX?: number;
+  frozenCenterY?: number;
+};
+
+export type HealthPickup = {
+  id: number;
+  x: number;
+  y: number;
+  speed: number;
+  ageMs: number;
 };
 
 export type Explosion = {
@@ -150,6 +178,7 @@ export type BossLaser = {
   id: number;
   x: number;
   y: number;
+  kind: BossLaserKind;
   telegraphMs: number;
   activeMs: number;
   maxTelegraphMs: number;
@@ -171,6 +200,7 @@ export type SceneState = {
   bullets: Bullet[];
   enemies: Enemy[];
   bossLasers: BossLaser[];
+  healthDrops: HealthPickup[];
   explosions: Explosion[];
   lives: number;
 };
@@ -363,12 +393,24 @@ function getEnemyDamage(kind: EnemyKind) {
 }
 
 function getEnemyModelImage(variant: EnemyVisualVariant) {
+  if (variant === 'asterlarge') {
+    return ASTERLARGE_MODEL_IMAGE;
+  }
+
+  if (variant === 'asterlarge2') {
+    return ASTERLARGE2_MODEL_IMAGE;
+  }
+
   if (variant === 'enemy2') {
     return ENEMY_STAGE_TWO_MODEL_IMAGE;
   }
 
   if (variant === 'boss2') {
     return BOSS_STAGE_TWO_MODEL_IMAGE;
+  }
+
+  if (variant === 'boss3') {
+    return BOSS_STAGE_THREE_MODEL_IMAGE;
   }
 
   return ENEMY_MODEL_IMAGE;
@@ -522,9 +564,11 @@ function createEnemy(
           : (Math.random() * 2 - 1) * maxSpawnOffset,
     y:
       kind === 'boss'
-        ? stage >= 2
-          ? 164
-          : 176
+        ? stage >= 3
+          ? 160
+          : stage >= 2
+            ? 164
+            : 176
         : kind === 'asteroid'
           ? 8
           : 10,
@@ -542,38 +586,87 @@ function createEnemy(
           : (Math.random() * 2 - 1) * 0.012,
     scale:
       kind === 'boss'
-        ? (stage >= 2 ? 1.72 : 1.62)
+        ? stage >= 3
+          ? 3
+          : stage >= 2
+            ? 1.72
+            : 1.62
         : kind === 'asteroid'
           ? 0.82 + Math.random() * 0.4
           : 0.9 + Math.random() * 0.28,
     wobblePhase: Math.random() * Math.PI * 2,
     modelVariant:
       kind === 'boss'
-        ? stage >= 2
-          ? 'boss2'
-          : 'enemy1'
-        : kind === 'grunt' && stage >= 2
+        ? stage >= 3
+          ? 'boss3'
+          : stage >= 2
+            ? 'boss2'
+            : 'enemy1'
+        : kind === 'asteroid' && stage >= 2
+          ? Math.random() > 0.5
+            ? 'asterlarge'
+            : 'asterlarge2'
+          : kind === 'grunt' && stage >= 2
           ? 'enemy2'
           : 'enemy1',
-    hp: kind === 'boss' ? BOSS_HP : stage >= 2 ? 2 : kind === 'asteroid' ? 2 : 1,
-    fireClockMs: Math.random() * 800,
+    hp:
+      kind === 'boss'
+        ? stage >= 3
+          ? BOSS_STAGE_THREE_HP
+          : BOSS_HP
+        : stage >= 2
+          ? 2
+          : kind === 'asteroid'
+            ? 2
+            : 1,
+    maxHp:
+      kind === 'boss'
+        ? stage >= 3
+          ? BOSS_STAGE_THREE_HP
+          : BOSS_HP
+        : stage >= 2
+          ? 2
+          : kind === 'asteroid'
+            ? 2
+            : 1,
+    fireClockMs:
+      kind === 'boss'
+        ? stage >= 3
+          ? -1200
+          : Math.random() * 800
+        : Math.random() * 800,
     fireCooldownMs:
       kind === 'boss'
-        ? 1400
+        ? stage >= 3
+          ? 1700
+          : stage >= 2
+            ? 1260
+            : 1400
         : stage >= 2
           ? 1900 + Math.random() * 800
           : 2600 + Math.random() * 1100,
     hitFlashMs: 0,
+    frozenUntilMs: 0,
+    frozenCenterX: undefined,
+    frozenCenterY: undefined,
   };
 }
 
 function getEnemyCenterX(enemy: Enemy, elapsedMs: number) {
+  if ((enemy.frozenUntilMs ?? 0) > elapsedMs && enemy.frozenCenterX != null) {
+    return enemy.frozenCenterX;
+  }
+
   const wobble =
     enemy.kind === 'boss' ? 10 : enemy.kind === 'asteroid' ? 2 : 4;
   return enemy.x + Math.sin(elapsedMs / 420 + enemy.wobblePhase) * wobble;
 }
 
 function getEnemyCenterY(enemy: Enemy, elapsedMs: number) {
+  if ((enemy.frozenUntilMs ?? 0) > elapsedMs && enemy.frozenCenterY != null) {
+    return enemy.frozenCenterY;
+  }
+
   const sway =
     enemy.kind === 'boss' ? 5 : enemy.kind === 'asteroid' ? 1.5 : 3;
   return enemy.y + Math.cos(elapsedMs / 560 + enemy.wobblePhase * 0.8) * sway;

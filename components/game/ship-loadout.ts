@@ -39,10 +39,10 @@ export function getShipGameplayProfile(shipId = activeShipId): ShipGameplayProfi
     case 'raptor':
       return {
         ship,
-        moveSpeedPxPerMs: 0.5,
+        moveSpeedPxPerMs: 0.58,
         standardFireCooldownMs: 106,
         pulseChargeMs: 360,
-        shipScale: 0.97,
+        shipScale: 0.82,
         shipBankMultiplier: 1.15,
         shipLiftOffset: 0,
         playerHp: 6,
@@ -51,10 +51,10 @@ export function getShipGameplayProfile(shipId = activeShipId): ShipGameplayProfi
     case 'viper':
       return {
         ship,
-        moveSpeedPxPerMs: 0.46,
+        moveSpeedPxPerMs: 0.56,
         standardFireCooldownMs: 118,
         pulseChargeMs: 280,
-        shipScale: 0.98,
+        shipScale: 0.8,
         shipBankMultiplier: 1.28,
         shipLiftOffset: -1,
         playerHp: 6,
@@ -63,10 +63,10 @@ export function getShipGameplayProfile(shipId = activeShipId): ShipGameplayProfi
     case 'tempest':
       return {
         ship,
-        moveSpeedPxPerMs: 0.54,
+        moveSpeedPxPerMs: 0.52,
         standardFireCooldownMs: 98,
         pulseChargeMs: 300,
-        shipScale: 0.95,
+        shipScale: 0.88,
         shipBankMultiplier: 1.2,
         shipLiftOffset: -1,
         playerHp: 7,
@@ -75,10 +75,10 @@ export function getShipGameplayProfile(shipId = activeShipId): ShipGameplayProfi
     case 'helios':
       return {
         ship,
-        moveSpeedPxPerMs: 0.32,
+        moveSpeedPxPerMs: 0.3,
         standardFireCooldownMs: 150,
         pulseChargeMs: 260,
-        shipScale: 1.05,
+        shipScale: 1.16,
         shipBankMultiplier: 0.92,
         shipLiftOffset: -2,
         playerHp: 7,
@@ -87,10 +87,10 @@ export function getShipGameplayProfile(shipId = activeShipId): ShipGameplayProfi
     case 'bastion':
       return {
         ship,
-        moveSpeedPxPerMs: 0.28,
+        moveSpeedPxPerMs: 0.24,
         standardFireCooldownMs: 168,
         pulseChargeMs: 340,
-        shipScale: 1.12,
+        shipScale: 1.34,
         shipBankMultiplier: 0.78,
         shipLiftOffset: 2,
         playerHp: 8,
@@ -99,10 +99,10 @@ export function getShipGameplayProfile(shipId = activeShipId): ShipGameplayProfi
     case 'atlas':
       return {
         ship,
-        moveSpeedPxPerMs: 0.3,
+        moveSpeedPxPerMs: 0.22,
         standardFireCooldownMs: 160,
         pulseChargeMs: 380,
-        shipScale: 1.1,
+        shipScale: 1.46,
         shipBankMultiplier: 0.8,
         shipLiftOffset: 2,
         playerHp: 8,
@@ -111,10 +111,10 @@ export function getShipGameplayProfile(shipId = activeShipId): ShipGameplayProfi
     case 'nova':
       return {
         ship,
-        moveSpeedPxPerMs: 0.42,
+        moveSpeedPxPerMs: 0.34,
         standardFireCooldownMs: 110,
         pulseChargeMs: 240,
-        shipScale: 1.03,
+        shipScale: 2,
         shipBankMultiplier: 1.08,
         shipLiftOffset: -1,
         playerHp: 9,

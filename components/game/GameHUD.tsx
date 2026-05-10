@@ -1,10 +1,10 @@
 import { Pressable, Text, View } from 'react-native';
 
 import {
-  BOSS_HP,
   type GameState,
   type SceneState,
 } from '@/components/game/game-logic';
+import { getStageHudSubtitle } from '@/components/game/game-stage';
 
 type GameStyles = Record<string, any>;
 
@@ -31,6 +31,7 @@ export function GameHUD({
 }: GameHUDProps) {
   const bossEnemy = scene.enemies.find((enemy) => enemy.kind === 'boss') ?? null;
   const bossHealth = bossEnemy?.hp ?? 0;
+  const bossMaxHealth = bossEnemy?.maxHp ?? 0;
   const bossHealthFlash = Math.min(1, (bossEnemy?.hitFlashMs ?? 0) / 180);
 
   return (
@@ -42,9 +43,7 @@ export function GameHUD({
         </View>
         <View style={styles.hudBlockRight}>
           <Text style={styles.hudText}>STAGE {scene.stage}</Text>
-          <Text style={styles.hudSubtext}>
-            {scene.stage === 2 ? 'ASTEROIDS LIVE' : 'BOSS INBOUND'}
-          </Text>
+          <Text style={styles.hudSubtext}>{getStageHudSubtitle(scene.stage)}</Text>
         </View>
       </View>
 
@@ -53,11 +52,11 @@ export function GameHUD({
           <View style={styles.bossMeterHeader}>
             <Text style={styles.bossMeterLabel}>BOSS CORE</Text>
             <Text style={styles.bossMeterValue}>
-              {bossHealth}/{BOSS_HP}
+              {bossHealth}/{bossMaxHealth}
             </Text>
           </View>
           <View style={styles.bossMeterTrack}>
-            {Array.from({ length: BOSS_HP }, (_, index) => (
+            {Array.from({ length: bossMaxHealth }, (_, index) => (
               <View
                 key={`boss-${index}`}
                 style={[

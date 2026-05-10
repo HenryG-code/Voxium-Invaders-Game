@@ -18,7 +18,7 @@ import { GameMenu } from '@/components/game/GameMenu';
 import { GameOverScreen } from '@/components/game/GameOverScreen';
 import { StageClearScreen } from '@/components/game/StageClearScreen';
 import { AlienInvader, HeroShip } from '@/components/game/game-actors';
-import { playSoundSafely, resetSoundSafely } from '@/components/game/game-audio';
+import { playSoundSafely, resetSoundSafely } from '@/components/game/game-audio.native';
 import {
   getNextUnlockHangarShip,
   getNewlyUnlockedHangarShips,
@@ -86,6 +86,7 @@ import {
   SPEED_LINE_COUNT,
   SHIP_COLLISION_HEIGHT,
   BulletKind,
+  HealthPickup,
   clamp,
   getEnemyCenterX,
   getEnemyCenterY,
@@ -95,7 +96,7 @@ import {
   getNextEnemySpawnDelay,
 } from '@/components/game/game-stage';
 import { getShipGameplayProfile } from '@/components/game/ship-loadout';
-import { useGameAudio } from '@/hooks/useGameAudio';
+import { useGameAudio } from '@/hooks/useGameAudio.native';
 import { useGameStorage } from '@/hooks/useGameStorage';
 
 export default function HomeScreen() {
@@ -140,6 +141,7 @@ export default function HomeScreen() {
     bullets: [],
     enemies: [],
     bossLasers: [],
+    healthDrops: [],
     explosions: [],
     lives: shipProfile.playerHp,
   });
@@ -161,9 +163,12 @@ export default function HomeScreen() {
   const enemyIdRef = useRef(0);
   const explosionIdRef = useRef(0);
   const bossLaserIdRef = useRef(0);
+  const healthDropIdRef = useRef(0);
   const enemySpawnClockRef = useRef(0);
   const nextEnemySpawnMsRef = useRef(1200);
   const bossSpawnedRef = useRef(false);
+  const healthDropClockRef = useRef(0);
+  const nextHealthDropMsRef = useRef(4800);
   const isFireHeldRef = useRef(false);
   const pulseModeRef = useRef(false);
   const fireHoldStartAtRef = useRef(0);
@@ -171,16 +176,23 @@ export default function HomeScreen() {
   const previousSceneSnapshotRef = useRef(scene);
   const heldMoveDirectionRef = useRef<0 | -1 | 1>(0);
   const targetShipOffsetRef = useRef(0);
+  const screenShakeRemainingRef = useRef(0);
 
   const {
+    alienBlasterPlayer,
+    blasterThreePlayer,
+    blasterTwoPlayer,
     bossPlayer,
     bossDestroyedPlayer,
     boostPlayer,
+    blipPlayer,
     destroyPlayer,
     firePlayer,
+    incomingPlayer,
     movePlayer,
     playerDeathPlayer,
     pulsePlayer,
+    victoryPlayer,
     wavePlayer,
   } = useGameAudio({
     gameState,
@@ -226,22 +238,27 @@ export default function HomeScreen() {
     () => getNextUnlockHangarShip(stageClearance),
     [stageClearance],
   );
-  const appVersion = Constants.expoConfig?.version ?? "0.1.17";
+  const appVersion = Constants.expoConfig?.version ?? "0.1.33";
   const movementLockedWhileFiring = activeShipId === "helios" && isFireHeld;
-  const playerFlightBaseLift = -88;
+  const playerFlightBaseLift = -104;
+  const NOVA_FREEZE_DURATION_MS = 1200;
 
   const buildShotsForAttack = useCallback(
     (attackMode: "standard" | "alt", muzzleOriginY: number, originX: number) => {
       const bullets: Bullet[] = [];
-      const pushBullet = (
-        kind: BulletKind,
-        options?: {
-          damage?: number;
-          maxAgeMs?: number;
-          offsetX?: number;
-          offsetY?: number;
-          pierce?: number;
-          vx?: number;
+          const pushBullet = (
+            kind: BulletKind,
+            options?: {
+              damage?: number;
+              blastRadius?: number;
+              beamTickMs?: number;
+              maxAgeMs?: number;
+              offsetX?: number;
+              offsetY?: number;
+              pierce?: number;
+              sourceShipId?: string;
+              vx?: number;
+              beamLength?: number;
         },
       ) => {
         const bulletHeight = getBulletHeight(kind);
@@ -249,27 +266,38 @@ export default function HomeScreen() {
           id: bulletIdRef.current++,
           x: originX + (options?.offsetX ?? 0),
           y:
-            muzzleOriginY -
-            Math.max(0, bulletHeight - BULLET_HEIGHT) / 2 +
-            (options?.offsetY ?? 0),
+            kind === "beam"
+              ? 0
+              : muzzleOriginY -
+                Math.max(0, bulletHeight - BULLET_HEIGHT) / 2 +
+                (options?.offsetY ?? 0),
           kind,
           vx: options?.vx,
           damage: options?.damage,
           ageMs: 0,
           maxAgeMs: options?.maxAgeMs,
           pierce: options?.pierce,
+          blastRadius: options?.blastRadius,
+          beamTickMs: options?.beamTickMs,
+          lastBeamHitMs: kind === "beam" ? -Infinity : undefined,
+          beamLength: options?.beamLength,
+          sourceShipId: options?.sourceShipId ?? activeShipId,
         });
       };
 
       switch (activeShipId) {
         case "raptor":
           if (attackMode === "alt") {
-            pushBullet("missile", { offsetX: -18, vx: -0.12, damage: 1.05, maxAgeMs: 1500 });
-            pushBullet("missile", { offsetX: -6, vx: -0.04, damage: 1.1, maxAgeMs: 1500 });
-            pushBullet("missile", { offsetX: 6, vx: 0.04, damage: 1.1, maxAgeMs: 1500 });
-            pushBullet("missile", { offsetX: 18, vx: 0.12, damage: 1.05, maxAgeMs: 1500 });
+            pushBullet("missile", {
+              damage: 2.6,
+              maxAgeMs: 1700,
+              blastRadius: 92,
+            });
           } else {
-            pushBullet("missile", { damage: 1.3, maxAgeMs: 1500 });
+            pushBullet("missile", {
+              damage: 1.3,
+              maxAgeMs: 1500,
+            });
           }
           break;
         case "viper":
@@ -290,7 +318,13 @@ export default function HomeScreen() {
           }
           break;
         case "helios":
-          pushBullet("beam", { damage: 0.7, maxAgeMs: 120, pierce: 8 });
+          pushBullet("beam", {
+            damage: 1.12,
+            maxAgeMs: 240,
+            pierce: 9999,
+            beamTickMs: 84,
+            beamLength: muzzleOriginY,
+          });
           break;
         case "bastion":
           if (attackMode === "alt") {
@@ -387,37 +421,6 @@ export default function HomeScreen() {
     }
   }, [highScore, scene.score, setHighScore]);
 
-  useEffect(() => {
-    if (screenShakeMs <= 0) {
-      return;
-    }
-
-    let frameId = 0;
-    let previousTime = 0;
-
-    const animateShake = (time: number) => {
-      if (!previousTime) {
-        previousTime = time;
-      }
-
-      const deltaMs = Math.min(34, time - previousTime);
-      previousTime = time;
-
-      setScreenShakeMs((currentMs) => {
-        if (currentMs <= 0) {
-          return 0;
-        }
-
-        return Math.max(0, currentMs - deltaMs);
-      });
-
-      frameId = requestAnimationFrame(animateShake);
-    };
-
-    frameId = requestAnimationFrame(animateShake);
-    return () => cancelAnimationFrame(frameId);
-  }, [screenShakeMs]);
-
   const applyShipOffset = useCallback(
     (nextOffset: number) => {
       const clampedOffset = clamp(nextOffset, -maxShipOffset, maxShipOffset);
@@ -459,6 +462,12 @@ export default function HomeScreen() {
       const deltaMs = Math.min(34, time - previousTime);
       previousTime = time;
 
+      if (screenShakeRemainingRef.current > 0) {
+        const nextShake = Math.max(0, screenShakeRemainingRef.current - deltaMs);
+        screenShakeRemainingRef.current = nextShake;
+        setScreenShakeMs(nextShake);
+      }
+
       if (gameStateRef.current === "playing") {
         const isMovementLocked = activeShipId === "helios" && isFireHeldRef.current;
 
@@ -477,8 +486,8 @@ export default function HomeScreen() {
         if (Math.abs(offsetDelta) > 0.01) {
           const responseMultiplier =
             heldMoveDirectionRef.current !== 0
-              ? 1.14
-              : Math.min(1.85, 1 + Math.abs(offsetDelta) / 72);
+              ? 1.22
+              : Math.min(2.05, 1 + Math.abs(offsetDelta) / 58);
           const movementStep = moveSpeedPxPerMs * deltaMs * responseMultiplier;
           const nextOffset =
             Math.abs(offsetDelta) <= movementStep
@@ -488,7 +497,6 @@ export default function HomeScreen() {
         }
 
         let shouldEnterStageClear = false;
-        enemySpawnClockRef.current += deltaMs;
 
         setScene((currentScene) => {
           const activePlayAreaHeight =
@@ -505,8 +513,16 @@ export default function HomeScreen() {
             }))
             .filter((explosion) => explosion.ageMs < explosion.maxAgeMs);
           const nextBossLasers = advanceBossLasers(currentScene.bossLasers, deltaMs);
+          const nextHealthDrops = currentScene.healthDrops
+            .map((drop) => ({
+              ...drop,
+              ageMs: drop.ageMs + deltaMs,
+              y: drop.y + drop.speed * deltaMs,
+            }))
+            .filter((drop) => drop.y < activePlayAreaHeight + 42);
           const spawnedBullets: Bullet[] = [];
           const spawnedBossLasers: BossLaser[] = [];
+          const spawnedHealthDrops: HealthPickup[] = [];
           const nextElapsedMs = currentScene.elapsedMs + deltaMs;
           let nextScore = currentScene.score || 0;
           let nextPlayerHp = currentScene.playerHp ?? playerHp;
@@ -521,10 +537,53 @@ export default function HomeScreen() {
           const bossAlreadyActive = currentScene.enemies.some(
             (enemy) => enemy.kind === "boss",
           );
+          const stageThreePrepActive =
+            currentStage >= 3 && !bossAlreadyActive && !bossSpawnedRef.current;
           let shouldSpawnBoss =
             !bossSpawnedRef.current &&
             !bossAlreadyActive &&
             nextStageKills >= bossSpawnThreshold;
+          if (stageThreePrepActive) {
+            enemySpawnClockRef.current +=
+              deltaMs * (boostRef.current ? 1.6 : 1);
+
+            if (enemySpawnClockRef.current >= nextEnemySpawnMsRef.current) {
+              spawnedEnemies.push(
+                createEnemy(
+                  enemyIdRef.current++,
+                  contentWidthRef.current,
+                  "boss",
+                  currentStage,
+                ),
+              );
+              bossSpawnedRef.current = true;
+              enemySpawnClockRef.current = 0;
+            }
+          } else {
+            enemySpawnClockRef.current += deltaMs;
+          }
+
+          if (currentStage >= 3) {
+            healthDropClockRef.current += deltaMs;
+            if (
+              nextHealthDrops.length + spawnedHealthDrops.length < 3 &&
+              healthDropClockRef.current >= nextHealthDropMsRef.current
+            ) {
+              healthDropClockRef.current = 0;
+              nextHealthDropMsRef.current = 3800 + Math.random() * 2200;
+              spawnedHealthDrops.push({
+                id: healthDropIdRef.current++,
+                x:
+                  (Math.random() * 2 - 1) *
+                  Math.max(42, contentWidthRef.current * 0.28),
+                y: -30,
+                speed: 0.06 + Math.random() * 0.03,
+                ageMs: 0,
+              });
+            }
+          } else {
+            healthDropClockRef.current = 0;
+          }
           const shipCenterY =
             activePlayAreaHeight -
             PLAY_AREA_BOTTOM_PADDING -
@@ -598,58 +657,65 @@ export default function HomeScreen() {
             }
           }
 
-          while (enemySpawnClockRef.current >= nextEnemySpawnMsRef.current) {
-            enemySpawnClockRef.current -= nextEnemySpawnMsRef.current;
+          if (currentStage < 3) {
+            while (enemySpawnClockRef.current >= nextEnemySpawnMsRef.current) {
+              enemySpawnClockRef.current -= nextEnemySpawnMsRef.current;
 
-            if (shouldSpawnBoss) {
-              spawnedEnemies.push(
-                createEnemy(
-                  enemyIdRef.current++,
-                  contentWidthRef.current,
-                  "boss",
-                  currentStage,
-                ),
-              );
-              bossSpawnedRef.current = true;
-              shouldSpawnBoss = false;
-              break;
-            } else {
-              const activeHostileCount = currentScene.enemies.filter(
-                (enemy) => enemy.kind !== "boss",
-              ).length;
-              const pendingHostileCount = spawnedEnemies.filter(
-                (enemy) => enemy.kind !== "boss",
-              ).length;
-              const maxHostiles = getStageMaxHostiles(currentStage);
-              const spawnKind = getStageEnemySpawnKind(currentStage);
-
-              if (activeHostileCount + pendingHostileCount < maxHostiles) {
+              if (shouldSpawnBoss) {
                 spawnedEnemies.push(
                   createEnemy(
                     enemyIdRef.current++,
                     contentWidthRef.current,
-                    spawnKind,
+                    "boss",
                     currentStage,
                   ),
                 );
-              }
-            }
+                bossSpawnedRef.current = true;
+                shouldSpawnBoss = false;
+                break;
+              } else {
+                const activeHostileCount = currentScene.enemies.filter(
+                  (enemy) => enemy.kind !== "boss",
+                ).length;
+                const pendingHostileCount = spawnedEnemies.filter(
+                  (enemy) => enemy.kind !== "boss",
+                ).length;
+                const maxHostiles = getStageMaxHostiles(currentStage);
+                const spawnKind = getStageEnemySpawnKind(currentStage);
 
-            nextEnemySpawnMsRef.current = getNextEnemySpawnDelay(currentStage);
+                if (activeHostileCount + pendingHostileCount < maxHostiles) {
+                  spawnedEnemies.push(
+                    createEnemy(
+                      enemyIdRef.current++,
+                      contentWidthRef.current,
+                      spawnKind,
+                      currentStage,
+                    ),
+                  );
+                }
+              }
+
+              nextEnemySpawnMsRef.current = getNextEnemySpawnDelay(currentStage);
+            }
           }
 
           for (const enemy of currentScene.enemies) {
-            const advancedEnemy: Enemy = {
+          const advancedEnemy: Enemy = {
               ...enemy,
               x:
-                enemy.kind === "boss"
-                  ? Math.sin(nextElapsedMs / 1200 + enemy.wobblePhase) *
-                    Math.max(
-                      28,
-                      contentWidthRef.current * 0.22,
-                    )
-                  : enemy.x + enemy.drift * deltaMs,
-              y: enemy.y + enemy.speed * deltaMs,
+                (enemy.frozenUntilMs ?? 0) > nextElapsedMs
+                  ? enemy.x
+                  : enemy.kind === "boss"
+                    ? Math.sin(nextElapsedMs / 1200 + enemy.wobblePhase) *
+                      Math.max(
+                        28,
+                        contentWidthRef.current * 0.22,
+                      )
+                    : enemy.x + enemy.drift * deltaMs,
+              y:
+                (enemy.frozenUntilMs ?? 0) > nextElapsedMs
+                  ? enemy.y
+                  : enemy.y + enemy.speed * deltaMs,
               fireClockMs: enemy.fireClockMs + deltaMs,
               hitFlashMs: Math.max(0, (enemy.hitFlashMs || 0) - deltaMs),
             };
@@ -661,13 +727,74 @@ export default function HomeScreen() {
                 advancedEnemy.fireClockMs,
               )
             ) {
-              spawnedBossLasers.push(
-                createBossLaser(
-                  bossLaserIdRef.current++,
-                  clamp(shipOffsetRef.current, -maxShipOffset, maxShipOffset),
-                  getBossLaserOriginY(advancedEnemy, nextElapsedMs),
-                ),
+              const bossLaserOriginY = getBossLaserOriginY(advancedEnemy, nextElapsedMs);
+              const bossLaserOriginX = clamp(
+                shipOffsetRef.current,
+                -maxShipOffset,
+                maxShipOffset,
               );
+
+              if (currentStage >= 3) {
+                spawnedBossLasers.push(
+                  createBossLaser(
+                    bossLaserIdRef.current++,
+                    bossLaserOriginX,
+                    bossLaserOriginY,
+                    "stage3",
+                  ),
+                );
+
+                const supportCount = 1 + (Math.random() > 0.45 ? 1 : 0);
+                for (let supportIndex = 0; supportIndex < supportCount; supportIndex += 1) {
+                  const offset = supportIndex === 0 ? -76 : 76;
+                  const supportEnemy = createEnemy(
+                    enemyIdRef.current++,
+                    contentWidthRef.current,
+                    "grunt",
+                    currentStage,
+                  );
+                  supportEnemy.x = clamp(
+                    advancedEnemy.x + offset,
+                    -Math.max(40, contentWidthRef.current / 2 - 42),
+                    Math.max(40, contentWidthRef.current / 2 - 42),
+                  );
+                  supportEnemy.y = advancedEnemy.y + 20;
+                  supportEnemy.speed = 0.042 + Math.random() * 0.026;
+                  supportEnemy.drift = offset < 0 ? -0.014 : 0.014;
+                  supportEnemy.scale = 0.82 + Math.random() * 0.12;
+                  supportEnemy.hp = 2;
+                  supportEnemy.maxHp = 2;
+                  supportEnemy.modelVariant = 'enemy2';
+                  supportEnemy.fireCooldownMs = 2100 + Math.random() * 700;
+                  spawnedEnemies.push(supportEnemy);
+                }
+              } else if (currentStage === 2) {
+                spawnedBossLasers.push(
+                  createBossLaser(
+                    bossLaserIdRef.current++,
+                    clamp(bossLaserOriginX - 42, -maxShipOffset, maxShipOffset),
+                    bossLaserOriginY,
+                    "stage2",
+                  ),
+                );
+                spawnedBossLasers.push(
+                  createBossLaser(
+                    bossLaserIdRef.current++,
+                    clamp(bossLaserOriginX + 42, -maxShipOffset, maxShipOffset),
+                    bossLaserOriginY,
+                    "stage2",
+                  ),
+                );
+              } else {
+                spawnedBossLasers.push(
+                  createBossLaser(
+                    bossLaserIdRef.current++,
+                    bossLaserOriginX,
+                    bossLaserOriginY,
+                    "stage1",
+                  ),
+                );
+              }
               advancedEnemy.fireClockMs = 0;
             }
 
@@ -739,14 +866,20 @@ export default function HomeScreen() {
           };
 
           for (const bullet of currentScene.bullets) {
-            const bulletWidth = getBulletWidth(bullet.kind);
-            const bulletHeight = getBulletHeight(bullet.kind);
+            const bulletWidth =
+              bullet.kind === "beam" ? 30 : getBulletWidth(bullet.kind);
+            const bulletHeight =
+              bullet.kind === "beam"
+                ? Math.max(1, bullet.beamLength ?? bullet.y)
+                : getBulletHeight(bullet.kind);
             const nextBullet: Bullet = {
               ...bullet,
               ageMs: (bullet.ageMs ?? 0) + deltaMs,
             };
 
-            if (bullet.kind === "seekerPod") {
+            if (bullet.kind === "beam") {
+              nextBullet.x = shipOffsetRef.current;
+            } else if (bullet.kind === "seekerPod") {
               let nearestEnemy: EnemyCollisionCandidate | null = null;
 
               for (const enemy of advancedEnemies) {
@@ -777,10 +910,12 @@ export default function HomeScreen() {
                 );
                 nextBullet.vx = (nextBullet.vx ?? 0) * 0.7 + desiredVx * 0.3;
               }
+              nextBullet.x += (nextBullet.vx ?? 0) * deltaMs;
+              nextBullet.y -= deltaMs * getBulletSpeed(bullet.kind);
+            } else {
+              nextBullet.x += (nextBullet.vx ?? 0) * deltaMs;
+              nextBullet.y -= deltaMs * getBulletSpeed(bullet.kind);
             }
-
-            nextBullet.x += (nextBullet.vx ?? 0) * deltaMs;
-            nextBullet.y -= deltaMs * getBulletSpeed(bullet.kind);
 
             if (
               nextBullet.y + bulletHeight <= -80 ||
@@ -856,6 +991,20 @@ export default function HomeScreen() {
             if (impactedCandidates.length > 0) {
               didHitEnemy = true;
               const bulletDamage = bullet.damage ?? getBulletDamage(bullet.kind);
+              const impactCenterX = impactedCandidates[0].centerX;
+              const impactCenterY = impactedCandidates[0].centerY;
+
+            if (bullet.kind === "beam") {
+              const beamTickMs = nextBullet.beamTickMs ?? 84;
+              const lastBeamHitMs = nextBullet.lastBeamHitMs ?? -Infinity;
+              const beamAgeMs = nextBullet.ageMs ?? 0;
+              if (beamAgeMs - lastBeamHitMs < beamTickMs) {
+                  survivingBullets.push(nextBullet);
+                  continue;
+                }
+
+                nextBullet.lastBeamHitMs = beamAgeMs;
+              }
 
               for (const candidate of impactedCandidates) {
                 if (hitEnemyIds.has(candidate.enemy.id)) {
@@ -865,9 +1014,64 @@ export default function HomeScreen() {
                 if (candidate.enemy.hp > bulletDamage) {
                   candidate.enemy.hp -= bulletDamage;
                   candidate.enemy.hitFlashMs = 180;
+                  if (
+                    bullet.sourceShipId === "nova" &&
+                    candidate.enemy.kind !== "boss"
+                  ) {
+                    candidate.enemy.frozenUntilMs = Math.max(
+                      candidate.enemy.frozenUntilMs ?? 0,
+                      nextElapsedMs + NOVA_FREEZE_DURATION_MS,
+                    );
+                    candidate.enemy.frozenCenterX = candidate.centerX;
+                    candidate.enemy.frozenCenterY = candidate.centerY;
+                  }
                 } else {
                   resolveEnemyKill(candidate);
                 }
+              }
+
+              if (bullet.blastRadius && bullet.blastRadius > 0) {
+                for (const enemy of advancedEnemies) {
+                  if (hitEnemyIds.has(enemy.id)) {
+                    continue;
+                  }
+
+                  const enemyCenterX = getEnemyCenterX(enemy, nextElapsedMs);
+                  const enemyCenterY = getEnemyCenterY(enemy, nextElapsedMs);
+                  const distance = Math.hypot(
+                    enemyCenterX - impactCenterX,
+                    enemyCenterY - impactCenterY,
+                  );
+
+                  if (distance > bullet.blastRadius) {
+                    continue;
+                  }
+
+                  const splashDamage = Math.max(
+                    bulletDamage * 0.3,
+                    bulletDamage * (1 - distance / bullet.blastRadius),
+                  );
+
+                  if (enemy.hp > splashDamage) {
+                    enemy.hp -= splashDamage;
+                    enemy.hitFlashMs = 160;
+                  } else {
+                    resolveEnemyKill({
+                      enemy,
+                      centerX: enemyCenterX,
+                      centerY: enemyCenterY,
+                      halfWidth:
+                        (getEnemyFrameWidth(enemy.kind) * enemy.scale) / 2,
+                      halfHeight:
+                        (getEnemyFrameHeight(enemy.kind) * enemy.scale) / 2,
+                    });
+                  }
+                }
+              }
+
+              if (bullet.kind === "beam") {
+                survivingBullets.push(nextBullet);
+                continue;
               }
 
               if ((nextBullet.pierce ?? 0) > 0) {
@@ -930,6 +1134,25 @@ export default function HomeScreen() {
             survivingEnemies.push(enemy);
           }
 
+          const survivingHealthDrops: HealthPickup[] = [];
+          for (const drop of nextHealthDrops) {
+            const dropCenterX = drop.x;
+            const dropCenterY = drop.y;
+            const shipCollisionX =
+              Math.abs(dropCenterX - shipOffsetRef.current) <=
+              SHIP_BOUNDING_WIDTH / 2 + 16;
+            const shipCollisionY =
+              Math.abs(dropCenterY - shipCenterY) <= SHIP_COLLISION_HEIGHT + 18;
+
+            if (shipCollisionX && shipCollisionY) {
+              nextPlayerHp = Math.min(playerHp, nextPlayerHp + 1);
+              nextPlayerDamageFlashMs = Math.max(0, nextPlayerDamageFlashMs - 40);
+              continue;
+            }
+
+            survivingHealthDrops.push(drop);
+          }
+
           for (const laser of nextBossLasers) {
             if (
               !doesBossLaserHitShip(
@@ -970,6 +1193,7 @@ export default function HomeScreen() {
               bullets: [],
               enemies: [],
               bossLasers: [],
+              healthDrops: [],
               explosions: nextExplosions,
               lives: nextPlayerHp,
             };
@@ -991,6 +1215,7 @@ export default function HomeScreen() {
             bullets: [...survivingBullets, ...spawnedBullets],
             enemies: survivingEnemies,
             bossLasers: [...nextBossLasers, ...spawnedBossLasers],
+            healthDrops: [...survivingHealthDrops, ...spawnedHealthDrops],
             explosions: nextExplosions,
             lives: nextPlayerHp,
           };
@@ -1023,6 +1248,9 @@ export default function HomeScreen() {
     if (gameState === "playing") {
       const previousEnemyIds = new Set(previousScene.enemies.map((enemy) => enemy.id));
       const previousBulletIds = new Set(previousScene.bullets.map((bullet) => bullet.id));
+      const previousBossLaserIds = new Set(previousScene.bossLasers.map((laser) => laser.id));
+      const previousExplosionIds = new Set(previousScene.explosions.map((explosion) => explosion.id));
+      const currentHealthDropIds = new Set(scene.healthDrops.map((drop) => drop.id));
       const spawnedBoss = scene.enemies.some(
         (enemy) => enemy.kind === "boss" && !previousEnemyIds.has(enemy.id),
       );
@@ -1032,7 +1260,36 @@ export default function HomeScreen() {
       const spawnedPulseBullet = scene.bullets.some(
         (bullet) => bullet.kind === "pulse" && !previousBulletIds.has(bullet.id),
       );
-      const explosionSpawned = scene.explosions.length > previousScene.explosions.length;
+      const spawnedMissileBullet = scene.bullets.some(
+        (bullet) => bullet.kind === "missile" && !previousBulletIds.has(bullet.id),
+      );
+      const spawnedNeedleBullet = scene.bullets.some(
+        (bullet) => bullet.kind === "needle" && !previousBulletIds.has(bullet.id),
+      );
+      const spawnedElectricBullet = scene.bullets.some(
+        (bullet) => bullet.kind === "electricOrb" && !previousBulletIds.has(bullet.id),
+      );
+      const spawnedBeamBullet = scene.bullets.some(
+        (bullet) => bullet.kind === "beam" && !previousBulletIds.has(bullet.id),
+      );
+      const spawnedPlasmaBullet = scene.bullets.some(
+        (bullet) => bullet.kind === "plasmaPellet" && !previousBulletIds.has(bullet.id),
+      );
+      const spawnedSeekerBullet = scene.bullets.some(
+        (bullet) => bullet.kind === "seekerPod" && !previousBulletIds.has(bullet.id),
+      );
+      const spawnedNovaBullet = scene.bullets.some(
+        (bullet) => bullet.kind === "novaPulse" && !previousBulletIds.has(bullet.id),
+      );
+      const spawnedBossLaser = scene.bossLasers.some(
+        (laser) => !previousBossLaserIds.has(laser.id),
+      );
+      const collectedHealthDrop = previousScene.healthDrops.some(
+        (drop) => !currentHealthDropIds.has(drop.id),
+      );
+      const explosionSpawned = scene.explosions.some(
+        (explosion) => !previousExplosionIds.has(explosion.id),
+      );
       const playerTookDamage =
         scene.playerHp < previousScene.playerHp ||
         scene.playerShield < previousScene.playerShield;
@@ -1048,8 +1305,49 @@ export default function HomeScreen() {
       }
 
       if (spawnedPulseBullet) {
-        void resetSoundSafely(firePlayer);
         void playSoundSafely(pulsePlayer, isSfxEnabledRef.current);
+      }
+
+      if (spawnedMissileBullet) {
+        void playSoundSafely(blasterTwoPlayer, isSfxEnabledRef.current);
+      }
+
+      if (spawnedNeedleBullet) {
+        void playSoundSafely(blipPlayer, isSfxEnabledRef.current);
+      }
+
+      if (spawnedElectricBullet) {
+        void playSoundSafely(blasterThreePlayer, isSfxEnabledRef.current);
+      }
+
+      if (spawnedBeamBullet) {
+        void playSoundSafely(alienBlasterPlayer, isSfxEnabledRef.current, true, false);
+      }
+
+      if (spawnedPlasmaBullet) {
+        void playSoundSafely(blasterThreePlayer, isSfxEnabledRef.current);
+      }
+
+      if (spawnedSeekerBullet) {
+        void playSoundSafely(incomingPlayer, isSfxEnabledRef.current);
+      }
+
+      if (spawnedNovaBullet) {
+        void playSoundSafely(blasterTwoPlayer, isSfxEnabledRef.current);
+      }
+
+      if (spawnedBossLaser) {
+        if (scene.stage >= 3) {
+          void playSoundSafely(alienBlasterPlayer, isSfxEnabledRef.current);
+        } else if (scene.stage === 2) {
+          void playSoundSafely(blasterThreePlayer, isSfxEnabledRef.current);
+        } else {
+          void playSoundSafely(bossPlayer, isSfxEnabledRef.current);
+        }
+      }
+
+      if (collectedHealthDrop) {
+        void playSoundSafely(blipPlayer, isSfxEnabledRef.current);
       }
 
       if ((explosionSpawned || playerTookDamage) && !bossJustDefeated && !playerJustDied) {
@@ -1060,12 +1358,16 @@ export default function HomeScreen() {
     previousSceneSnapshotRef.current = scene;
   }, [
     applyShipOffset,
+    alienBlasterPlayer,
     bossPlayer,
     destroyPlayer,
-    firePlayer,
+    blasterThreePlayer,
+    blasterTwoPlayer,
     gameState,
     maxShipOffset,
     moveSpeedPxPerMs,
+    blipPlayer,
+    incomingPlayer,
     pulsePlayer,
     scene,
     wavePlayer,
@@ -1118,8 +1420,10 @@ export default function HomeScreen() {
       pulseModeRef.current = false;
       fireHoldStartAtRef.current = 0;
       void resetSoundSafely(boostPlayer);
+      screenShakeRemainingRef.current = 480;
       setScreenShakeMs(480);
       void playSoundSafely(bossDestroyedPlayer, isSfxEnabledRef.current);
+      void playSoundSafely(victoryPlayer, isSfxEnabledRef.current);
       setGameState("stageClear");
     }
   }, [
@@ -1132,6 +1436,7 @@ export default function HomeScreen() {
     stageClearance,
     setLastRunScore,
     setHighestClearedStage,
+    victoryPlayer,
   ]);
 
   const resetRunState = useCallback(() => {
@@ -1147,14 +1452,18 @@ export default function HomeScreen() {
     enemyIdRef.current = 0;
     explosionIdRef.current = 0;
     bossLaserIdRef.current = 0;
+    healthDropIdRef.current = 0;
     enemySpawnClockRef.current = 0;
     nextEnemySpawnMsRef.current = 1200;
     bossSpawnedRef.current = false;
+    healthDropClockRef.current = 0;
+    nextHealthDropMsRef.current = 4800;
     isFireHeldRef.current = false;
     heldMoveDirectionRef.current = 0;
     pulseModeRef.current = false;
     fireHoldStartAtRef.current = 0;
     targetShipOffsetRef.current = 0;
+    screenShakeRemainingRef.current = 0;
     setScreenShakeMs(0);
     setScene({
       elapsedMs: 0,
@@ -1169,6 +1478,7 @@ export default function HomeScreen() {
       bullets: [],
       enemies: [],
       bossLasers: [],
+      healthDrops: [],
       explosions: [],
       lives: playerHp,
     });
@@ -1231,30 +1541,36 @@ export default function HomeScreen() {
     }
   };
 
-  const continueToStageTwo = () => {
-    if (gameState !== "stageClear" || scene.stage !== 1) {
+  const continueToNextStage = () => {
+    if (gameState !== "stageClear" || scene.stage >= 3) {
       return;
     }
 
+    const nextStage = scene.stage + 1;
     setScene((currentScene) => ({
       ...currentScene,
-      stage: 2,
+      stage: nextStage,
       stageKills: 0,
       bossDefeated: false,
       playerDamageFlashMs: 0,
       bullets: [],
       enemies: [],
       bossLasers: [],
+      healthDrops: [],
       explosions: [],
     }));
     enemySpawnClockRef.current = 0;
-    nextEnemySpawnMsRef.current = 1100;
+    nextEnemySpawnMsRef.current = nextStage >= 3 ? 30000 : 1100;
     bossSpawnedRef.current = false;
+    healthDropClockRef.current = 0;
+    nextHealthDropMsRef.current = 4800;
     isFireHeldRef.current = false;
     heldMoveDirectionRef.current = 0;
     pulseModeRef.current = false;
     fireHoldStartAtRef.current = 0;
     targetShipOffsetRef.current = shipOffsetRef.current;
+    screenShakeRemainingRef.current = 0;
+    setScreenShakeMs(0);
     setIsFireHeld(false);
     setStageClearAnnouncement(null);
     setGameState("playing");
@@ -1382,6 +1698,12 @@ export default function HomeScreen() {
     pulseModeRef.current = false;
     fireHoldStartAtRef.current = 0;
     setIsFireHeld(false);
+    if (activeShipId === "helios") {
+      setScene((currentScene) => ({
+        ...currentScene,
+        bullets: currentScene.bullets.filter((bullet) => bullet.kind !== "beam"),
+      }));
+    }
   };
 
   const handleBoostStart = () => {
@@ -1446,8 +1768,8 @@ export default function HomeScreen() {
     switch (bullet.kind) {
       case "missile":
         return {
-          backgroundColor: "#86FFD1",
-          shadowColor: "#86FFD1",
+          backgroundColor: "#5A6678",
+          shadowColor: "#AAB7C6",
           shadowRadius: 12,
         };
       case "needle":
@@ -1501,7 +1823,7 @@ export default function HomeScreen() {
   const getBulletCoreVariant = (bullet: Bullet) => {
     switch (bullet.kind) {
       case "missile":
-        return { width: 4, backgroundColor: "#FFF8D9" };
+        return { width: 5, backgroundColor: "#F8E8B8" };
       case "needle":
         return { width: 2, backgroundColor: "#F6FFF3" };
       case "electricOrb":
@@ -1840,12 +2162,67 @@ export default function HomeScreen() {
               ))}
             </View>
 
+            <View style={styles.healthDropLayer} pointerEvents="none">
+              {scene.healthDrops.map((drop) => {
+                const activePlayAreaHeight =
+                  playAreaHeight || Math.max(260, height * 0.52);
+                const dropX = contentWidth / 2 + drop.x;
+
+                return (
+                  <View
+                    key={drop.id}
+                    style={[
+                      styles.healthDropOrb,
+                      {
+                        left: dropX,
+                        top: drop.y,
+                      },
+                    ]}
+                  >
+                    <View style={styles.healthDropGlow} />
+                    <View style={styles.healthDropCore}>
+                      <Text style={styles.healthDropText}>+</Text>
+                    </View>
+                    <View
+                      style={[
+                        styles.healthDropTrail,
+                        {
+                          left: 12.5,
+                          top: 20,
+                          height: Math.min(42, Math.max(18, activePlayAreaHeight * 0.04)),
+                        },
+                      ]}
+                    />
+                  </View>
+                );
+              })}
+            </View>
+
             <View style={styles.enemyLaserLayer} pointerEvents="none">
               {scene.bossLasers.map((laser) => {
                 const isActive = laser.telegraphMs >= laser.maxTelegraphMs;
                 const activePlayAreaHeight =
                   playAreaHeight || Math.max(260, height * 0.52);
                 const beamHeight = Math.max(0, activePlayAreaHeight - laser.y);
+                const lightningSegments =
+                  laser.kind === "stage3"
+                    ? Array.from({ length: 8 }, (_, index) => {
+                        const segmentHeight = Math.max(12, beamHeight / 8);
+                        const jitterSeed = laser.id * 19 + index * 23 + Math.floor(laser.activeMs / 24);
+                        const horizontalShift = ((jitterSeed % 7) - 3) * 6;
+                        const rotate = (index % 2 === 0 ? 1 : -1) * (8 + (jitterSeed % 3) * 3);
+                        const segmentWidth = index === 0 ? 32 : index === 7 ? 28 : 18 + (jitterSeed % 2) * 4;
+
+                        return {
+                          id: index,
+                          top: Math.min(beamHeight - 6, index * (segmentHeight * 0.88)),
+                          width: segmentWidth,
+                          height: segmentHeight + 8,
+                          translateX: horizontalShift,
+                          rotate: `${rotate}deg`,
+                        };
+                      })
+                    : [];
 
                 return (
                   <View
@@ -1855,6 +2232,8 @@ export default function HomeScreen() {
                       isActive
                         ? styles.enemyLaserBeamActive
                         : styles.enemyLaserBeamTelegraph,
+                      laser.kind === "stage3" && styles.enemyLaserBeamStageThree,
+                      laser.kind === "stage2" && styles.enemyLaserBeamStageTwo,
                       {
                         left: contentWidth / 2 + laser.x - laser.width / 2,
                         top: laser.y,
@@ -1864,73 +2243,210 @@ export default function HomeScreen() {
                       },
                     ]}
                   >
-                    <View
-                      style={[
-                        styles.enemyLaserAura,
-                        isActive
-                          ? styles.enemyLaserAuraActive
-                          : styles.enemyLaserAuraTelegraph,
-                      ]}
-                    />
-                    <View
-                      style={[
-                        styles.enemyLaserEmitter,
-                        isActive
-                          ? styles.enemyLaserEmitterActive
-                          : styles.enemyLaserEmitterTelegraph,
-                      ]}
-                    />
-                    <View
-                      style={[
-                        styles.enemyLaserCore,
-                        isActive
-                          ? styles.enemyLaserCoreActive
-                          : styles.enemyLaserCoreTelegraph,
-                      ]}
-                    />
+                    {laser.kind === "stage3" ? (
+                      <View style={styles.enemyLightningBolt}>
+                        <View
+                          style={[
+                            styles.enemyLightningAura,
+                            isActive
+                              ? styles.enemyLightningAuraActive
+                              : styles.enemyLightningAuraTelegraph,
+                          ]}
+                        />
+                        {lightningSegments.map((segment) => (
+                          <View
+                            key={`${laser.id}-${segment.id}`}
+                            style={[
+                              styles.enemyLightningSegment,
+                              isActive
+                                ? styles.enemyLightningSegmentActive
+                                : styles.enemyLightningSegmentTelegraph,
+                              {
+                                top: segment.top,
+                                width: segment.width,
+                                height: segment.height,
+                                transform: [
+                                  { translateX: segment.translateX },
+                                  { rotate: segment.rotate },
+                                ],
+                              },
+                            ]}
+                          />
+                        ))}
+                        <View
+                          style={[
+                            styles.enemyLightningSpark,
+                            isActive
+                              ? styles.enemyLightningSparkActive
+                              : styles.enemyLightningSparkTelegraph,
+                          ]}
+                        />
+                      </View>
+                    ) : (
+                      <>
+                        <View
+                          style={[
+                            styles.enemyLaserAura,
+                            isActive
+                              ? styles.enemyLaserAuraActive
+                              : styles.enemyLaserAuraTelegraph,
+                            laser.kind === "stage2" &&
+                              styles.enemyLaserAuraStageTwo,
+                          ]}
+                        />
+                        <View
+                          style={[
+                            styles.enemyLaserEmitter,
+                            isActive
+                              ? styles.enemyLaserEmitterActive
+                              : styles.enemyLaserEmitterTelegraph,
+                            laser.kind === "stage2" &&
+                              styles.enemyLaserEmitterStageTwo,
+                          ]}
+                        />
+                        <View
+                          style={[
+                            styles.enemyLaserCore,
+                            isActive
+                              ? styles.enemyLaserCoreActive
+                              : styles.enemyLaserCoreTelegraph,
+                            laser.kind === "stage2" &&
+                              styles.enemyLaserCoreStageTwo,
+                          ]}
+                        />
+                      </>
+                    )}
                   </View>
                 );
               })}
             </View>
 
             <View style={styles.bulletLayer} pointerEvents="none">
-              {scene.bullets.map((bullet) => (
-                <View
-                  key={bullet.id}
-                  style={[
-                    styles.bulletShell,
-                    bullet.kind === "pulse" && styles.pulseBulletShell,
-                    getBulletShellVariant(bullet),
-                    {
-                      left:
-                        contentWidth / 2 +
-                        bullet.x -
-                        getBulletWidth(bullet.kind) / 2,
-                      top: bullet.y,
-                      width: getBulletWidth(bullet.kind),
-                      height: getBulletHeight(bullet.kind),
-                      transform:
-                        bullet.kind === "missile" ||
-                        bullet.kind === "needle" ||
-                        bullet.kind === "plasmaPellet" ||
-                        bullet.kind === "seekerPod"
-                          ? [{ rotate: `${(bullet.vx ?? 0) * 160}deg` }]
-                          : undefined,
-                    },
-                  ]}
-                >
+              {scene.bullets.map((bullet) => {
+                const isBeam = bullet.kind === "beam";
+                const bulletWidth = isBeam ? 30 : getBulletWidth(bullet.kind);
+                const bulletHeight = isBeam
+                  ? Math.max(1, bullet.beamLength ?? bullet.y)
+                  : getBulletHeight(bullet.kind);
+                const beamPulse = isBeam
+                  ? 0.72 + Math.sin(((bullet.ageMs ?? 0) / 18) * Math.PI * 2) * 0.09
+                  : 0;
+
+                return (
                   <View
+                    key={bullet.id}
                     style={[
-                      styles.bulletCore,
-                      bullet.kind === "pulse" && styles.pulseBulletCore,
-                      getBulletCoreVariant(bullet),
+                      styles.bulletShell,
+                      bullet.kind === "pulse" && styles.pulseBulletShell,
+                      isBeam && styles.heliosBeamShell,
+                      !isBeam && getBulletShellVariant(bullet),
                       {
-                        height: getBulletHeight(bullet.kind) - 6,
+                        left: contentWidth / 2 + bullet.x - bulletWidth / 2,
+                        top: isBeam ? 0 : bullet.y,
+                        width: bulletWidth,
+                        height: bulletHeight,
+                        transform:
+                          bullet.kind === "missile" ||
+                          bullet.kind === "needle" ||
+                          bullet.kind === "plasmaPellet" ||
+                          bullet.kind === "seekerPod"
+                            ? [{ rotate: `${(bullet.vx ?? 0) * 160}deg` }]
+                            : undefined,
                       },
                     ]}
-                  />
-                </View>
-              ))}
+                  >
+                    {isBeam ? (
+                      <>
+                        <View
+                          style={[
+                            styles.heliosBeamWash,
+                            { opacity: 0.26 + beamPulse * 0.08 },
+                          ]}
+                        />
+                        <View
+                          style={[
+                            styles.heliosBeamAura,
+                            { opacity: 0.48 + beamPulse * 0.16 },
+                          ]}
+                        />
+                        <View
+                          style={[
+                            styles.heliosBeamCore,
+                            { opacity: 0.82 + beamPulse * 0.1 },
+                          ]}
+                        />
+                        <View
+                          style={[
+                            styles.heliosBeamDischarge,
+                            {
+                              opacity: 0.86 + beamPulse * 0.1,
+                              transform: [{ scale: 1 + beamPulse * 0.08 }],
+                            },
+                          ]}
+                        />
+                        <View
+                          style={[
+                            styles.heliosBeamDischargeCore,
+                            { opacity: 0.95 + beamPulse * 0.04 },
+                          ]}
+                        />
+                        <View style={styles.heliosBeamEmitter} />
+                      </>
+                    ) : (
+                      <>
+                        {bullet.kind === "missile" ? (
+                          <>
+                            <View
+                              style={[
+                                styles.missileSmokeTrail,
+                                {
+                                  opacity: 0.18,
+                                  left: -18,
+                                  width: 18,
+                                  top: getBulletHeight(bullet.kind) / 2 - 3,
+                                },
+                              ]}
+                            />
+                            <View
+                              style={[
+                                styles.missileSmokeTrail,
+                                {
+                                  opacity: 0.24,
+                                  left: -10,
+                                  width: 14,
+                                  top: getBulletHeight(bullet.kind) / 2 - 2,
+                                },
+                              ]}
+                            />
+                            <View
+                              style={[
+                                styles.missileSmokeTrail,
+                                {
+                                  opacity: 0.32,
+                                  left: -4,
+                                  width: 9,
+                                  top: getBulletHeight(bullet.kind) / 2 - 1,
+                                },
+                              ]}
+                            />
+                            <View style={styles.missileNoseFlare} />
+                          </>
+                        ) : null}
+                        <View
+                          style={[
+                            styles.bulletCore,
+                            bullet.kind === "pulse" && styles.pulseBulletCore,
+                            getBulletCoreVariant(bullet),
+                            {
+                              height: getBulletHeight(bullet.kind) - 6,
+                            },
+                          ]}
+                        />
+                      </>
+                    )}
+                  </View>
+                );
+              })}
             </View>
 
             <View style={styles.explosionLayer} pointerEvents="none">
@@ -2003,7 +2519,7 @@ export default function HomeScreen() {
 
             {gameState === "stageClear" && (
               <StageClearScreen
-                onContinue={continueToStageTwo}
+                onContinue={continueToNextStage}
                 onRestart={startGame}
                 onReturnToMenu={returnToMenuFromStageClear}
                 unlockAnnouncement={stageClearAnnouncement}
@@ -2445,7 +2961,7 @@ const styles = StyleSheet.create({
   },
   hudOverlay: {
     position: "absolute",
-    top: SCREEN_TOP_PADDING,
+    top: 18,
     left: SCREEN_HORIZONTAL_PADDING,
     right: SCREEN_HORIZONTAL_PADDING,
     zIndex: 6,
@@ -2454,57 +2970,57 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "center",
-    marginBottom: 6,
+    marginBottom: 4,
   },
   hudBlock: {
-    gap: 3,
+    gap: 2,
   },
   hudBlockRight: {
-    gap: 3,
+    gap: 2,
     alignItems: "flex-end",
   },
   hudText: {
     color: "#FFFFFF",
-    fontSize: 15,
+    fontSize: 12,
     fontWeight: "800",
     letterSpacing: 0.9,
   },
   hudSubtext: {
     color: "#96BFEA",
-    fontSize: 9,
+    fontSize: 7,
     fontWeight: "700",
-    letterSpacing: 1,
+    letterSpacing: 0.8,
   },
   statusMeters: {
     flexDirection: "row",
     justifyContent: "space-between",
     gap: 8,
-    marginBottom: 10,
+    marginBottom: 6,
     zIndex: 2,
   },
   bossMeterSection: {
     borderWidth: 1,
-    borderColor: "rgba(255, 201, 108, 0.26)",
-    backgroundColor: "rgba(24, 16, 7, 0.7)",
-    paddingHorizontal: 10,
-    paddingVertical: 8,
-    marginBottom: 10,
+    borderColor: "rgba(255, 201, 108, 0.18)",
+    backgroundColor: "rgba(24, 16, 7, 0.28)",
+    paddingHorizontal: 7,
+    paddingVertical: 5,
+    marginBottom: 5,
   },
   bossMeterHeader: {
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "center",
-    marginBottom: 6,
+    marginBottom: 4,
   },
   bossMeterLabel: {
     color: "#FFD991",
-    fontSize: 9,
+    fontSize: 8,
     fontWeight: "900",
-    letterSpacing: 1.3,
+    letterSpacing: 1.1,
   },
   bossMeterValue: {
     color: "#FFE8BF",
-    fontSize: 10,
+    fontSize: 8,
     fontWeight: "800",
     letterSpacing: 0.8,
   },
@@ -2514,7 +3030,7 @@ const styles = StyleSheet.create({
   },
   bossMeterSegment: {
     flex: 1,
-    height: 8,
+    height: 6,
     borderRadius: 4,
     borderWidth: 1,
   },
@@ -2530,17 +3046,17 @@ const styles = StyleSheet.create({
   statusMeter: {
     flex: 1,
     borderWidth: 1,
-    borderColor: "#2F4662",
-    backgroundColor: "rgba(8, 14, 24, 0.7)",
-    paddingHorizontal: 8,
-    paddingVertical: 6,
+    borderColor: "rgba(47, 70, 98, 0.18)",
+    backgroundColor: "rgba(8, 14, 24, 0.28)",
+    paddingHorizontal: 6,
+    paddingVertical: 4,
   },
   statusMeterLabel: {
     color: "#D4E6FB",
-    fontSize: 9,
+    fontSize: 8,
     fontWeight: "800",
-    letterSpacing: 1.1,
-    marginBottom: 4,
+    letterSpacing: 1,
+    marginBottom: 3,
   },
   statusBarRow: {
     flexDirection: "row",
@@ -2548,7 +3064,7 @@ const styles = StyleSheet.create({
   },
   statusBar: {
     flex: 1,
-    height: 8,
+    height: 6,
     borderRadius: 4,
     borderWidth: 1,
   },
@@ -2573,41 +3089,45 @@ const styles = StyleSheet.create({
   },
   titleWrap: {
     alignItems: "center",
-    marginBottom: 10,
+    marginBottom: 4,
+    backgroundColor: "rgba(7, 13, 21, 0.18)",
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 999,
   },
   title: {
     color: "#F2F7FF",
-    fontSize: 24,
+    fontSize: 13,
     fontWeight: "800",
-    letterSpacing: 1.6,
+    letterSpacing: 0.8,
     textAlign: "center",
   },
   subtitle: {
     color: "#9FC7FF",
-    fontSize: 9,
+    fontSize: 6,
     fontWeight: "700",
-    letterSpacing: 1.5,
-    marginTop: 4,
+    letterSpacing: 0.6,
+    marginTop: 2,
   },
   hudActions: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 8,
+    flexDirection: "column",
+    alignItems: "flex-end",
+    gap: 3,
   },
   menuReturnButton: {
-    alignSelf: "flex-start",
+    alignSelf: "flex-end",
     borderWidth: 1,
-    borderColor: "#89B8E7",
-    backgroundColor: "#0C1421",
-    paddingVertical: 4,
-    paddingHorizontal: 10,
-    marginBottom: 6,
+    borderColor: "rgba(137, 184, 231, 0.28)",
+    backgroundColor: "rgba(12, 18, 33, 0.28)",
+    paddingVertical: 2,
+    paddingHorizontal: 8,
+    marginBottom: 0,
   },
   menuReturnButtonText: {
     color: "#DCE9F7",
-    fontSize: 10,
+    fontSize: 7,
     fontWeight: "800",
-    letterSpacing: 0.8,
+    letterSpacing: 0.6,
   },
   playArea: {
     flex: 1,
@@ -2654,6 +3174,9 @@ const styles = StyleSheet.create({
     zIndex: 1,
   },
   enemyLayer: {
+    ...StyleSheet.absoluteFillObject,
+  },
+  healthDropLayer: {
     ...StyleSheet.absoluteFillObject,
   },
   enemyFrame: {
@@ -2967,6 +3490,16 @@ const styles = StyleSheet.create({
     shadowRadius: 24,
     elevation: 14,
   },
+  enemyLaserBeamStageTwo: {
+    backgroundColor: "rgba(255, 177, 86, 0.44)",
+    shadowColor: "#FFD799",
+    shadowOpacity: 0.95,
+  },
+  enemyLaserBeamStageThree: {
+    backgroundColor: "rgba(157, 111, 255, 0.42)",
+    shadowColor: "#BC95FF",
+    shadowOpacity: 1,
+  },
   enemyLaserAura: {
     position: "absolute",
     top: 0,
@@ -2979,6 +3512,12 @@ const styles = StyleSheet.create({
   },
   enemyLaserAuraActive: {
     backgroundColor: "rgba(255, 82, 110, 0.24)",
+  },
+  enemyLaserAuraStageTwo: {
+    backgroundColor: "rgba(255, 211, 150, 0.18)",
+  },
+  enemyLaserAuraStageThree: {
+    backgroundColor: "rgba(193, 156, 255, 0.2)",
   },
   enemyLaserEmitter: {
     position: "absolute",
@@ -2997,6 +3536,14 @@ const styles = StyleSheet.create({
     shadowRadius: 16,
     elevation: 10,
   },
+  enemyLaserEmitterStageTwo: {
+    backgroundColor: "rgba(255, 194, 118, 0.72)",
+    shadowColor: "#FFD799",
+  },
+  enemyLaserEmitterStageThree: {
+    backgroundColor: "rgba(180, 132, 255, 0.72)",
+    shadowColor: "#C8A8FF",
+  },
   enemyLaserCore: {
     width: 16,
     height: "100%",
@@ -3008,6 +3555,76 @@ const styles = StyleSheet.create({
   enemyLaserCoreActive: {
     width: 24,
     backgroundColor: "#FFE7EB",
+  },
+  enemyLaserCoreStageTwo: {
+    backgroundColor: "#FFF2D8",
+  },
+  enemyLaserCoreStageThree: {
+    width: 22,
+    backgroundColor: "#F4E8FF",
+  },
+  enemyLightningBolt: {
+    position: "absolute",
+    top: 0,
+    left: "50%",
+    width: 96,
+    height: "100%",
+    transform: [{ translateX: -48 }],
+    overflow: "visible",
+  },
+  enemyLightningAura: {
+    position: "absolute",
+    top: 0,
+    left: "50%",
+    width: 34,
+    height: "100%",
+    marginLeft: -17,
+    borderRadius: 999,
+  },
+  enemyLightningAuraTelegraph: {
+    backgroundColor: "rgba(231, 212, 255, 0.12)",
+  },
+  enemyLightningAuraActive: {
+    backgroundColor: "rgba(201, 168, 255, 0.18)",
+    shadowColor: "#E6C6FF",
+    shadowOpacity: 1,
+    shadowRadius: 20,
+    elevation: 12,
+  },
+  enemyLightningSegment: {
+    position: "absolute",
+    left: "50%",
+    marginLeft: -4,
+    borderRadius: 999,
+  },
+  enemyLightningSegmentTelegraph: {
+    backgroundColor: "rgba(230, 210, 255, 0.42)",
+  },
+  enemyLightningSegmentActive: {
+    backgroundColor: "#F9F0FF",
+    shadowColor: "#FFFFFF",
+    shadowOpacity: 1,
+    shadowRadius: 14,
+    elevation: 10,
+  },
+  enemyLightningSpark: {
+    position: "absolute",
+    left: "50%",
+    top: 0,
+    width: 16,
+    height: 16,
+    marginLeft: -8,
+    borderRadius: 999,
+  },
+  enemyLightningSparkTelegraph: {
+    backgroundColor: "rgba(255, 255, 255, 0.6)",
+  },
+  enemyLightningSparkActive: {
+    backgroundColor: "#FFFFFF",
+    shadowColor: "#FFFFFF",
+    shadowOpacity: 1,
+    shadowRadius: 12,
+    elevation: 12,
   },
   bulletShell: {
     position: "absolute",
@@ -3028,16 +3645,171 @@ const styles = StyleSheet.create({
     shadowRadius: 14,
     elevation: 10,
   },
+  heliosBeamShell: {
+    overflow: "visible",
+    alignItems: "center",
+    justifyContent: "flex-start",
+    shadowColor: "#FFF2B8",
+    shadowOpacity: 1,
+    shadowRadius: 32,
+    elevation: 16,
+  },
+  heliosBeamWash: {
+    position: "absolute",
+    left: 4,
+    right: 4,
+    top: 0,
+    bottom: 0,
+    borderRadius: 999,
+    backgroundColor: "rgba(255, 226, 142, 0.12)",
+  },
+  heliosBeamAura: {
+    position: "absolute",
+    left: 7,
+    right: 7,
+    top: 0,
+    bottom: 0,
+    borderRadius: 999,
+    backgroundColor: "rgba(255, 213, 120, 0.42)",
+    shadowColor: "#FFE69C",
+    shadowOpacity: 0.95,
+    shadowRadius: 24,
+    elevation: 14,
+  },
+  heliosBeamCore: {
+    position: "absolute",
+    left: "50%",
+    top: 0,
+    width: 12,
+    height: "100%",
+    marginLeft: -6,
+    borderRadius: 999,
+    backgroundColor: "#FFF7DE",
+    shadowColor: "#FFFFFF",
+    shadowOpacity: 1,
+    shadowRadius: 14,
+    elevation: 18,
+  },
+  heliosBeamDischarge: {
+    position: "absolute",
+    left: "50%",
+    bottom: 2,
+    width: 42,
+    height: 42,
+    marginLeft: -21,
+    borderRadius: 999,
+    backgroundColor: "rgba(255, 225, 140, 0.32)",
+    shadowColor: "#FFF0AE",
+    shadowOpacity: 1,
+    shadowRadius: 26,
+    elevation: 18,
+  },
+  heliosBeamDischargeCore: {
+    position: "absolute",
+    left: "50%",
+    bottom: 11,
+    width: 18,
+    height: 18,
+    marginLeft: -9,
+    borderRadius: 999,
+    backgroundColor: "#FFFDF0",
+    shadowColor: "#FFFFFF",
+    shadowOpacity: 1,
+    shadowRadius: 16,
+    elevation: 16,
+  },
+  heliosBeamEmitter: {
+    position: "absolute",
+    left: "50%",
+    bottom: 6,
+    width: 28,
+    height: 28,
+    marginLeft: -14,
+    borderRadius: 999,
+    backgroundColor: "rgba(255, 222, 132, 0.18)",
+    shadowColor: "#FFE9A7",
+    shadowOpacity: 1,
+    shadowRadius: 18,
+    elevation: 14,
+  },
   bulletCore: {
     width: 2,
     height: BULLET_HEIGHT - 6,
     borderRadius: 999,
     backgroundColor: "#FFFFFF",
   },
+  missileSmokeTrail: {
+    position: "absolute",
+    height: 6,
+    borderRadius: 999,
+    backgroundColor: "rgba(184, 190, 202, 0.76)",
+    shadowColor: "#EEF2F6",
+    shadowOpacity: 0.4,
+    shadowRadius: 4,
+  },
+  missileNoseFlare: {
+    position: "absolute",
+    right: 1,
+    top: BULLET_HEIGHT / 2 - 4,
+    width: 3,
+    height: 8,
+    borderRadius: 999,
+    backgroundColor: "#FFF4CA",
+    shadowColor: "#FFF0B8",
+    shadowOpacity: 0.9,
+    shadowRadius: 6,
+  },
   pulseBulletCore: {
     width: 12,
     backgroundColor: "#EAF5FF",
     opacity: 0.92,
+  },
+  healthDropOrb: {
+    position: "absolute",
+    width: 30,
+    height: 38,
+    alignItems: "center",
+    justifyContent: "flex-start",
+    marginLeft: -15,
+  },
+  healthDropGlow: {
+    position: "absolute",
+    top: 6,
+    left: 7,
+    width: 16,
+    height: 16,
+    borderRadius: 999,
+    backgroundColor: "rgba(110, 255, 190, 0.16)",
+    shadowColor: "#82FFC0",
+    shadowOpacity: 0.6,
+    shadowRadius: 10,
+  },
+  healthDropCore: {
+    width: 22,
+    height: 22,
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: "#9BFFD2",
+    backgroundColor: "rgba(23, 55, 42, 0.92)",
+    alignItems: "center",
+    justifyContent: "center",
+    shadowColor: "#82FFC0",
+    shadowOpacity: 0.9,
+    shadowRadius: 10,
+    elevation: 6,
+  },
+  healthDropText: {
+    color: "#CCFFE9",
+    fontSize: 14,
+    fontWeight: "900",
+    marginTop: -1,
+  },
+  healthDropTrail: {
+    position: "absolute",
+    width: 5,
+    marginTop: 1,
+    borderRadius: 999,
+    backgroundColor: "rgba(130, 255, 192, 0.12)",
   },
   explosionBurst: {
     position: "absolute",
@@ -4199,7 +4971,7 @@ const styles = StyleSheet.create({
     alignItems: "flex-end",
     justifyContent: "flex-end",
     marginLeft: 0,
-    marginBottom: 36,
+    marginBottom: 28,
   },
   fireHintText: {
     color: "#B7D7F2",

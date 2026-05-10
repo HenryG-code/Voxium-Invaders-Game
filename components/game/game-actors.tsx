@@ -43,14 +43,14 @@ export function HeroShip({
           ],
         },
       ]}
-      >
+    >
       <View
         style={[
           styles.playerShipShadow,
           decorative && styles.playerShipShadowDecorative,
         ]}
       />
-      {damageFlashOpacity > 0 && (
+      {damageFlashOpacity > 0 ? (
         <View
           pointerEvents="none"
           style={[
@@ -60,7 +60,7 @@ export function HeroShip({
             },
           ]}
         />
-      )}
+      ) : null}
       <ExpoImage
         source={getShipModelImage(modelKey)}
         contentFit="contain"
@@ -98,38 +98,40 @@ export function AlienInvader({
             enemy.kind === 'asteroid'
               ? [{ scale: enemy.scale }, { rotate: asteroidSpin }]
               : [{ scale: enemy.scale }],
-          },
-        ]}
-      >
-        {hitFlashOpacity > 0 && (
-          <View
-            pointerEvents="none"
-            style={[
-              styles.enemyHitFlash,
-              {
-                opacity: hitFlashOpacity,
-                backgroundColor:
-                  enemy.kind === 'boss'
-                    ? 'rgba(255, 201, 108, 0.42)'
-                    : enemy.kind === 'asteroid'
-                      ? 'rgba(255, 248, 232, 0.36)'
-                      : 'rgba(255, 255, 255, 0.34)',
-              },
-            ]}
-          />
-        )}
-        {enemy.kind === 'asteroid' ? (
-          <View style={styles.asteroidShell}>
-            <View style={styles.asteroidShadow} />
-            <View style={styles.asteroidHighlight} />
-          <View style={styles.asteroidRidge} />
-          <View style={styles.asteroidFacetA} />
-          <View style={styles.asteroidFacetB} />
-          <View style={styles.asteroidFacetC} />
-          <View style={styles.asteroidCraterLarge} />
-          <View style={styles.asteroidCraterMedium} />
-          <View style={styles.asteroidCraterSmall} />
-        </View>
+        },
+      ]}
+    >
+      {hitFlashOpacity > 0 ? (
+        <View
+          pointerEvents="none"
+          style={[
+            styles.enemyHitFlash,
+            {
+              opacity: hitFlashOpacity,
+              backgroundColor:
+                enemy.kind === 'boss'
+                  ? 'rgba(255, 201, 108, 0.42)'
+                  : enemy.kind === 'asteroid'
+                    ? 'rgba(255, 248, 232, 0.36)'
+                    : 'rgba(255, 255, 255, 0.34)',
+            },
+          ]}
+        />
+      ) : null}
+
+      {enemy.kind === 'asteroid' ? (
+        <ExpoImage
+          source={getEnemyModelImage(enemy.modelVariant)}
+          contentFit="contain"
+          style={[
+            styles.enemyShipImage,
+            {
+              width: frameWidth,
+              height: frameHeight,
+              transform: [{ rotate: asteroidSpin }],
+            },
+          ]}
+        />
       ) : (
         <View
           style={[

@@ -36,7 +36,7 @@ export function StageClearScreen({
           <Text style={styles.stageClearUnlockText}>{unlockAnnouncement}</Text>
         </View>
       ) : null}
-      {stage === 1 ? (
+      {stage < 3 ? (
         <>
           <Pressable
             style={styles.gameOverPrimaryButton}

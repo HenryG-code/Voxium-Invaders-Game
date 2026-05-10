@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import type { AudioPlayer } from 'expo-audio';
+import { Audio } from 'expo-av';
 import type { GestureResponderEvent } from 'react-native';
 
 import {
@@ -16,7 +16,7 @@ import {
   clamp,
   getBulletHeight,
 } from '@/components/game/game-logic';
-import { playSoundSafely, resetSoundSafely } from '@/components/game/game-audio';
+import { playSoundSafely, resetSoundSafely } from '../components/game/game-audio.native';
 
 type MutableNumberRef = { current: number };
 type MutableBooleanRef = { current: boolean };
@@ -24,12 +24,12 @@ type MutableGameStateRef = { current: GameState };
 type MutableSceneRef = { current: SceneState };
 
 type UsePlayerControlsArgs = {
-  boostPlayer: AudioPlayer;
-  firePlayer: AudioPlayer;
+  boostPlayer: Audio.Sound | null;
+  firePlayer: Audio.Sound | null;
   gameStateRef: MutableGameStateRef;
   heightRef: MutableNumberRef;
   isSfxEnabledRef: MutableBooleanRef;
-  movePlayer: AudioPlayer;
+  movePlayer: Audio.Sound | null;
   moveStep: number;
   maxShipOffset: number;
   playAreaHeightRef: MutableNumberRef;

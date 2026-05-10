@@ -16,9 +16,17 @@ import {
 } from "@/components/game/hangar-data";
 import { getShipModelImage } from "@/components/game/game-logic";
 import { requestMainMenuReturn } from "@/components/game/main-menu-return";
+import { getShipGameplayProfile } from "@/components/game/ship-loadout";
 import { useGameStorage } from "@/hooks/useGameStorage";
 
-function renderStatBar(label: string, value: number, accent: string) {
+function renderStatBar(
+  label: string,
+  value: number,
+  accent: string,
+  maxValue = 100,
+) {
+  const normalizedValue = Math.max(0, Math.min(100, (value / maxValue) * 100));
+
   return (
     <View key={label} style={styles.statRow}>
       <View style={styles.statHeader}>
@@ -26,16 +34,16 @@ function renderStatBar(label: string, value: number, accent: string) {
         <Text style={styles.statValue}>{value}</Text>
       </View>
       <View style={styles.statTrack}>
-        <View
-          style={[
-            styles.statFill,
-            {
-              width: `${value}%`,
-              backgroundColor: accent,
-            },
-          ]}
-        />
-      </View>
+          <View
+            style={[
+              styles.statFill,
+              {
+                width: `${normalizedValue}%`,
+                backgroundColor: accent,
+              },
+            ]}
+          />
+        </View>
     </View>
   );
 }
@@ -52,6 +60,7 @@ export default function HangarScreen() {
 
   const selectedShip =
     HANGAR_SHIPS.find((ship) => ship.id === selectedShipId) ?? HANGAR_SHIPS[0];
+  const selectedShipProfile = getShipGameplayProfile(selectedShip.id);
   const availableShips = getUnlockedHangarShips(stageClearance);
   const nextUnlockShip = getNextUnlockHangarShip(stageClearance);
   const remainingUnlocks = HANGAR_SHIPS.length - availableShips.length;
@@ -138,10 +147,7 @@ export default function HangarScreen() {
                 <Image
                   source={getShipModelImage(selectedShip.modelKey)}
                   contentFit="contain"
-                  style={[
-                    styles.shipImage,
-                    { tintColor: selectedShip.hullTint },
-                  ]}
+                  style={styles.shipImage}
                 />
               </View>
             </View>
@@ -191,6 +197,18 @@ export default function HangarScreen() {
             <View style={styles.infoPanel}>
               <Text style={styles.panelEyebrow}>FRAME READOUT</Text>
               <View style={styles.statGroup}>
+                {renderStatBar(
+                  "HP",
+                  selectedShip.stats.hp,
+                  selectedShip.accent,
+                  10,
+                )}
+                {renderStatBar(
+                  "SHIELD",
+                  selectedShip.stats.shield,
+                  selectedShip.accent,
+                  6,
+                )}
                 {renderStatBar("SPEED", selectedShip.stats.speed, selectedShip.accent)}
                 {renderStatBar("ARMOR", selectedShip.stats.armor, selectedShip.accent)}
                 {renderStatBar(
@@ -212,6 +230,10 @@ export default function HangarScreen() {
               </Text>
               <Text style={styles.unlockNote}>
                 {selectedShip.unlockNote} Model file target: {selectedShip.modelKey}
+              </Text>
+              <Text style={styles.infoText}>
+                Base hull and shield output: {selectedShipProfile.playerHp} HP /{" "}
+                {selectedShipProfile.shieldPoints} SHIELD
               </Text>
               {nextUnlockShip ? (
                 <Text style={styles.nextUnlockNote}>
@@ -280,7 +302,9 @@ export default function HangarScreen() {
                         contentFit="contain"
                         style={[
                           styles.selectorShipImage,
-                          { tintColor: isUnlocked ? ship.hullTint : "#708295" },
+                          {
+                            opacity: isUnlocked ? 1 : 0.42,
+                          },
                         ]}
                       />
                     </View>

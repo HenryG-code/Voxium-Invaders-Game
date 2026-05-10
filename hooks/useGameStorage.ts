@@ -1,5 +1,5 @@
 import { File, Paths } from 'expo-file-system';
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Platform } from 'react-native';
 
 import { getActiveShipId, setActiveShipId as setGlobalActiveShipId } from '@/components/game/ship-loadout';
@@ -38,7 +38,8 @@ const DEFAULT_GAME_STATE: PersistedGameState = {
 };
 let latestGameStateCache: PersistedGameState = DEFAULT_GAME_STATE;
 
-const gameStateFile = new File(Paths.document, GAME_STATE_FILENAME);
+const gameStateFile =
+  Platform.OS === 'web' ? null : new File(Paths.document, GAME_STATE_FILENAME);
 const inMemoryStorage = new Map<string, string>();
 
 function normalizeGameState(
@@ -65,6 +66,10 @@ function normalizeGameState(
 }
 
 async function readNativeState() {
+  if (!gameStateFile) {
+    return DEFAULT_GAME_STATE;
+  }
+
   try {
     const storedState = await gameStateFile.text();
     const normalizedState = normalizeGameState(
@@ -161,6 +166,10 @@ async function writePersistedGameState(state: PersistedGameState) {
 
   inMemoryStorage.set(GAME_STATE_FILENAME, serializedState);
 
+  if (!gameStateFile) {
+    return;
+  }
+
   try {
     gameStateFile.write(serializedState);
   } catch {}
@@ -239,12 +248,12 @@ export function useGameStorage() {
     setGlobalActiveShipId(activeShipId);
   }, [activeShipId]);
 
-  const refreshActiveShip = () => {
+  const refreshActiveShip = useCallback(() => {
     const nextShipId = getActiveShipId();
     setActiveShipIdState(nextShipId);
-  };
+  }, []);
 
-  const setActiveShipId = (shipId: string) => {
+  const setActiveShipId = useCallback((shipId: string) => {
     const normalizedShipId = shipId;
     latestGameStateCache = {
       ...latestGameStateCache,
@@ -252,9 +261,9 @@ export function useGameStorage() {
     };
     setActiveShipIdState(normalizedShipId);
     setGlobalActiveShipId(normalizedShipId);
-  };
+  }, []);
 
-  const setHighScore = (value: React.SetStateAction<number>) => {
+  const setHighScore = useCallback((value: React.SetStateAction<number>) => {
     setHighScoreState((currentValue) => {
       const nextValue =
         typeof value === 'function' ? value(currentValue) : value;
@@ -264,9 +273,9 @@ export function useGameStorage() {
       };
       return nextValue;
     });
-  };
+  }, []);
 
-  const setLastRunScore = (value: React.SetStateAction<number>) => {
+  const setLastRunScore = useCallback((value: React.SetStateAction<number>) => {
     setLastRunScoreState((currentValue) => {
       const nextValue =
         typeof value === 'function' ? value(currentValue) : value;
@@ -276,9 +285,9 @@ export function useGameStorage() {
       };
       return nextValue;
     });
-  };
+  }, []);
 
-  const setIsMusicEnabled = (value: React.SetStateAction<boolean>) => {
+  const setIsMusicEnabled = useCallback((value: React.SetStateAction<boolean>) => {
     setIsMusicEnabledState((currentValue) => {
       const nextValue =
         typeof value === 'function' ? value(currentValue) : value;
@@ -288,9 +297,9 @@ export function useGameStorage() {
       };
       return nextValue;
     });
-  };
+  }, []);
 
-  const setIsSfxEnabled = (value: React.SetStateAction<boolean>) => {
+  const setIsSfxEnabled = useCallback((value: React.SetStateAction<boolean>) => {
     setIsSfxEnabledState((currentValue) => {
       const nextValue =
         typeof value === 'function' ? value(currentValue) : value;
@@ -300,9 +309,9 @@ export function useGameStorage() {
       };
       return nextValue;
     });
-  };
+  }, []);
 
-  const setHighestClearedStageState = (value: React.SetStateAction<number>) => {
+  const setHighestClearedStageState = useCallback((value: React.SetStateAction<number>) => {
     setHighestClearedStage((currentValue) => {
       const nextValue =
         typeof value === 'function' ? value(currentValue) : value;
@@ -312,7 +321,7 @@ export function useGameStorage() {
       };
       return nextValue;
     });
-  };
+  }, []);
 
   return {
     activeShipId,

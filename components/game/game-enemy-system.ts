@@ -1,6 +1,7 @@
 import {
   getEnemyCenterY,
   getEnemyFrameHeight,
+  type BossLaserKind,
   type BossLaser,
   type Enemy,
   type EnemyKind,
@@ -10,16 +11,36 @@ export function createBossLaser(
   id: number,
   x: number,
   y: number,
+  kind: BossLaserKind,
 ): BossLaser {
+  const configByKind = {
+    stage1: {
+      telegraphMs: 340,
+      maxActiveMs: 520,
+      width: 68,
+    },
+    stage2: {
+      telegraphMs: 240,
+      maxActiveMs: 440,
+      width: 50,
+    },
+    stage3: {
+      telegraphMs: 540,
+      maxActiveMs: 420,
+      width: 72,
+    },
+  } as const;
+
   return {
     id,
     x,
     y,
+    kind,
     telegraphMs: 0,
     activeMs: 0,
-    maxTelegraphMs: 340,
-    maxActiveMs: 520,
-    width: 68,
+    maxTelegraphMs: configByKind[kind].telegraphMs,
+    maxActiveMs: configByKind[kind].maxActiveMs,
+    width: configByKind[kind].width,
     hasHitPlayer: false,
   };
 }
@@ -50,7 +71,7 @@ export function shouldLaunchBossLaser(
   stage: number,
   fireClockMs: number,
 ): boolean {
-  return enemy.kind === 'boss' && stage === 1 && fireClockMs >= enemy.fireCooldownMs;
+  return enemy.kind === 'boss' && stage >= 1 && fireClockMs >= enemy.fireCooldownMs;
 }
 
 export function getBossLaserOriginY(enemy: Enemy, elapsedMs: number) {
