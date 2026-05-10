@@ -47,3 +47,49 @@ npm run start
 ## Current Status
 
 The prototype is playable, and the codebase is now being split into smaller gameplay modules so it is easier to extend stage logic, enemy behavior, and UI sections without fighting one giant screen file.
+
+## Folder Structure
+
+```
+├── app/                # App entry, navigation, and screens
+│   ├── (tabs)/         # Tabbed navigation screens (main game, hangar, etc.)
+│   └── _layout.tsx     # App layout
+├── assets/             # Images and sounds
+├── components/         # Reusable UI and game components
+│   ├── game/           # Game logic, actors, audio, HUD, menus
+│   └── ui/             # UI utilities (icons, collapsibles)
+├── constants/          # Theme and constant values
+├── hooks/              # Custom React hooks
+├── scripts/            # Project scripts (e.g., reset-project.js)
+├── android/            # Android native project files
+├── package.json        # Project metadata and dependencies
+├── tsconfig.json       # TypeScript configuration
+└── README.md           # Project documentation
+```
+
+## Available Scripts
+
+In the project directory, you can run:
+
+- `npm run start` — Start the Expo development server
+- `npm run android` — Run the app on Android
+- `npm run ios` — Run the app on iOS
+- `npm run web` — Run the app in a web browser
+- `npm run lint` — Lint the codebase
+- `npm run reset-project` — Reset the project using the provided script
+
+## Main Dependencies
+
+- expo, react, react-native, expo-router, expo-audio, expo-image, expo-haptics, expo-status-bar, expo-web-browser
+- @react-navigation/*, @expo/vector-icons, @react-native-async-storage/async-storage
+- TypeScript, ESLint
+
+See `package.json` for the full list.
+
+## Contributing
+
+Contributions are welcome! Please open an issue or submit a pull request.
+
+## License
+
+This project is licensed under the MIT License. See [LICENSE](LICENSE) for details.

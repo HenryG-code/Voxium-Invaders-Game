@@ -1,7 +1,6 @@
 import MaterialIcons from "@expo/vector-icons/MaterialIcons";
 import { useNavigation } from "@react-navigation/native";
 import { Image } from "expo-image";
-import { useState } from "react";
 import {
   Pressable,
   ScrollView,
@@ -12,16 +11,12 @@ import {
 } from "react-native";
 import {
   HANGAR_SHIPS,
-  HANGAR_STAGE_CLEARANCE,
+  getNextUnlockHangarShip,
   getUnlockedHangarShips,
 } from "@/components/game/hangar-data";
+import { getShipModelImage } from "@/components/game/game-logic";
 import { requestMainMenuReturn } from "@/components/game/main-menu-return";
-import {
-  getActiveShipId,
-  setActiveShipId,
-} from "@/components/game/ship-loadout";
-
-const PLAYER_SHIP_IMAGE = require("../../assets/images/playerShip.png");
+import { useGameStorage } from "@/hooks/useGameStorage";
 
 function renderStatBar(label: string, value: number, accent: string) {
   return (
@@ -49,11 +44,16 @@ export default function HangarScreen() {
   const navigation = useNavigation();
   const { width } = useWindowDimensions();
   const isWide = width >= 920;
-  const [selectedShipId, setSelectedShipId] = useState(getActiveShipId());
+  const {
+    activeShipId: selectedShipId,
+    highestClearedStage: stageClearance,
+    setActiveShipId,
+  } = useGameStorage();
 
   const selectedShip =
     HANGAR_SHIPS.find((ship) => ship.id === selectedShipId) ?? HANGAR_SHIPS[0];
-  const availableShips = getUnlockedHangarShips(HANGAR_STAGE_CLEARANCE);
+  const availableShips = getUnlockedHangarShips(stageClearance);
+  const nextUnlockShip = getNextUnlockHangarShip(stageClearance);
   const remainingUnlocks = HANGAR_SHIPS.length - availableShips.length;
 
   return (
@@ -85,7 +85,8 @@ export default function HangarScreen() {
             <Text style={styles.title}>Voxium Hangar</Text>
             <Text style={styles.subtitle}>
               Switch active ships, inspect weapon frames, and build toward the
-              next unlock line.
+              next unlock line. Frames are now staged in fixed slots 1 to 8 for
+              your upcoming model imports.
             </Text>
           </View>
 
@@ -135,7 +136,7 @@ export default function HangarScreen() {
               </View>
               <View style={styles.shipDisplayWrap}>
                 <Image
-                  source={PLAYER_SHIP_IMAGE}
+                  source={getShipModelImage(selectedShip.modelKey)}
                   contentFit="contain"
                   style={[
                     styles.shipImage,
@@ -162,6 +163,16 @@ export default function HangarScreen() {
                 />
                 <Text style={styles.badgeText}>
                   STAGE {selectedShip.unlockStage} UNLOCK
+                </Text>
+              </View>
+              <View style={styles.badge}>
+                <MaterialIcons
+                  name="view-in-ar"
+                  size={15}
+                  color={selectedShip.accent}
+                />
+                <Text style={styles.badgeText}>
+                  SLOT {selectedShip.serialNumber} | {selectedShip.modelKey}
                 </Text>
               </View>
             </View>
@@ -193,14 +204,21 @@ export default function HangarScreen() {
             <View style={styles.infoPanel}>
               <Text style={styles.panelEyebrow}>PROGRESSION</Text>
               <Text style={styles.progressTitle}>
-                Stage clearance: {HANGAR_STAGE_CLEARANCE}
+                Clearance credits: {stageClearance}
               </Text>
               <Text style={styles.infoText}>
-                New frames unlock as players clear deeper stages. The hangar is
-                ready for ship-specific weapons like missiles, beam frames, and
-                siege payloads.
+                Clearance is saved between runs. Clear more stages to unlock
+                stronger frames, then come back here to swap your active ship.
               </Text>
-              <Text style={styles.unlockNote}>{selectedShip.unlockNote}</Text>
+              <Text style={styles.unlockNote}>
+                {selectedShip.unlockNote} Model file target: {selectedShip.modelKey}
+              </Text>
+              {nextUnlockShip ? (
+                <Text style={styles.nextUnlockNote}>
+                  NEXT UNLOCK: {nextUnlockShip.name} REQUIRES CLEARANCE{" "}
+                  {nextUnlockShip.unlockStage}
+                </Text>
+              ) : null}
             </View>
           </View>
         </View>
@@ -223,8 +241,13 @@ export default function HangarScreen() {
             contentContainerStyle={styles.selectorRow}
           >
             {HANGAR_SHIPS.map((ship) => {
-              const isUnlocked = ship.unlockStage <= HANGAR_STAGE_CLEARANCE;
+              const isUnlocked = ship.unlockStage <= stageClearance;
               const isSelected = ship.id === selectedShip.id;
+              const lockText = isUnlocked
+                ? isSelected
+                  ? "SELECTED"
+                  : "UNLOCKED"
+                : `LOCKED UNTIL CLEARANCE ${ship.unlockStage}`;
 
               return (
                 <Pressable
@@ -242,7 +265,6 @@ export default function HangarScreen() {
                   onPress={() => {
                     if (isUnlocked) {
                       setActiveShipId(ship.id);
-                      setSelectedShipId(ship.id);
                     }
                   }}
                 >
@@ -254,7 +276,7 @@ export default function HangarScreen() {
                       ]}
                     >
                       <Image
-                        source={PLAYER_SHIP_IMAGE}
+                        source={getShipModelImage(ship.modelKey)}
                         contentFit="contain"
                         style={[
                           styles.selectorShipImage,
@@ -264,6 +286,9 @@ export default function HangarScreen() {
                     </View>
                     <View style={styles.selectorMeta}>
                       <Text style={styles.selectorShipName}>{ship.name}</Text>
+                      <Text style={styles.selectorShipSlot}>
+                        SLOT {ship.serialNumber} | {ship.modelKey}
+                      </Text>
                       <Text style={styles.selectorShipWeapon}>{ship.weapon}</Text>
                       <Text style={styles.selectorShipAbility}>
                         {ship.abilityName}
@@ -272,7 +297,9 @@ export default function HangarScreen() {
                   </View>
 
                   <Text style={styles.selectorShipRole}>{ship.role}</Text>
-                  <Text style={styles.selectorShipUnlock}>{ship.unlockNote}</Text>
+                  <Text style={styles.selectorShipUnlock}>
+                    {isUnlocked ? ship.unlockNote : `Locked: ${ship.unlockNote}`}
+                  </Text>
 
                   <View style={styles.selectorCardFooter}>
                     <View
@@ -289,11 +316,7 @@ export default function HangarScreen() {
                         color={isUnlocked ? "#7FF0C9" : "#FFCD6A"}
                       />
                       <Text style={styles.selectorStateText}>
-                        {isUnlocked
-                          ? isSelected
-                            ? "SELECTED"
-                            : "READY"
-                          : `STAGE ${ship.unlockStage}`}
+                        {lockText}
                       </Text>
                     </View>
                     <MaterialIcons
@@ -626,6 +649,14 @@ const styles = StyleSheet.create({
     lineHeight: 18,
     fontWeight: "700",
   },
+  nextUnlockNote: {
+    color: "#B8D5F2",
+    fontSize: 11,
+    lineHeight: 16,
+    fontWeight: "800",
+    marginTop: 2,
+    letterSpacing: 0.4,
+  },
   statGroup: {
     gap: 12,
   },
@@ -729,6 +760,12 @@ const styles = StyleSheet.create({
     color: "#EFF8FF",
     fontSize: 17,
     fontWeight: "900",
+  },
+  selectorShipSlot: {
+    color: "#BFD7EA",
+    fontSize: 10,
+    fontWeight: "800",
+    letterSpacing: 0.8,
   },
   selectorShipWeapon: {
     color: "#8EB0CC",

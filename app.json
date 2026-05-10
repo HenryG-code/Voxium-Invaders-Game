@@ -2,12 +2,11 @@
   "expo": {
     "name": "Voxium Invaders",
     "slug": "voxium-invaders",
-    "version": "0.1.11",
+    "version": "0.1.17",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
     "scheme": "voxiuminvaders",
     "userInterfaceStyle": "automatic",
-
     "ios": {
       "supportsTablet": true
     },
@@ -18,8 +17,14 @@
         "backgroundImage": "./assets/images/android-icon-background.png",
         "monochromeImage": "./assets/images/android-icon-monochrome.png"
       },
-
-      "predictiveBackGestureEnabled": false
+      "predictiveBackGestureEnabled": false,
+      "permissions": [
+        "android.permission.RECORD_AUDIO",
+        "android.permission.MODIFY_AUDIO_SETTINGS",
+        "android.permission.RECORD_AUDIO",
+        "android.permission.MODIFY_AUDIO_SETTINGS"
+      ],
+      "package": "com.anonymous.voxiuminvaders"
     },
     "web": {
       "output": "static",

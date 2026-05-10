@@ -1,7 +1,16 @@
 import { Image as ExpoImage } from 'expo-image';
 import { View } from 'react-native';
 
-import { PLAYER_SHIP_IMAGE, type AlienInvaderProps, type HeroShipProps, getEnemyCenterX, getEnemyCenterY, getEnemyFrameHeight, getEnemyFrameWidth, getEnemyModelImage } from '@/components/game/game-logic';
+import {
+  type AlienInvaderProps,
+  type HeroShipProps,
+  getEnemyCenterX,
+  getEnemyCenterY,
+  getEnemyFrameHeight,
+  getEnemyFrameWidth,
+  getEnemyModelImage,
+  getShipModelImage,
+} from '@/components/game/game-logic';
 
 type GameActorStyles = Record<string, any>;
 
@@ -12,10 +21,13 @@ export function HeroShip({
   shipLift = 0,
   scale = 1,
   decorative = false,
+  damageFlashMs = 0,
+  modelKey = 'Warden',
   styles,
 }: HeroShipProps & { styles: GameActorStyles }) {
   const accelerationScale = isBoosting ? 1.02 : 1;
   const modelScale = decorative ? 1.04 : 1;
+  const damageFlashOpacity = Math.min(1, damageFlashMs / 220);
 
   return (
     <View
@@ -31,15 +43,26 @@ export function HeroShip({
           ],
         },
       ]}
-    >
+      >
       <View
         style={[
           styles.playerShipShadow,
           decorative && styles.playerShipShadowDecorative,
         ]}
       />
+      {damageFlashOpacity > 0 && (
+        <View
+          pointerEvents="none"
+          style={[
+            styles.playerShipDamageFlash,
+            {
+              opacity: damageFlashOpacity,
+            },
+          ]}
+        />
+      )}
       <ExpoImage
-        source={PLAYER_SHIP_IMAGE}
+        source={getShipModelImage(modelKey)}
         contentFit="contain"
         style={styles.playerShipSvgImage}
       />
@@ -58,6 +81,7 @@ export function AlienInvader({
   const frameWidth = getEnemyFrameWidth(enemy.kind);
   const frameHeight = getEnemyFrameHeight(enemy.kind);
   const asteroidSpin = `${(elapsedMs / 16 + enemy.wobblePhase * 28) % 360}deg`;
+  const hitFlashOpacity = Math.min(1, (enemy.hitFlashMs ?? 0) / 180);
 
   return (
     <View
@@ -74,13 +98,30 @@ export function AlienInvader({
             enemy.kind === 'asteroid'
               ? [{ scale: enemy.scale }, { rotate: asteroidSpin }]
               : [{ scale: enemy.scale }],
-        },
-      ]}
-    >
-      {enemy.kind === 'asteroid' ? (
-        <View style={styles.asteroidShell}>
-          <View style={styles.asteroidShadow} />
-          <View style={styles.asteroidHighlight} />
+          },
+        ]}
+      >
+        {hitFlashOpacity > 0 && (
+          <View
+            pointerEvents="none"
+            style={[
+              styles.enemyHitFlash,
+              {
+                opacity: hitFlashOpacity,
+                backgroundColor:
+                  enemy.kind === 'boss'
+                    ? 'rgba(255, 201, 108, 0.42)'
+                    : enemy.kind === 'asteroid'
+                      ? 'rgba(255, 248, 232, 0.36)'
+                      : 'rgba(255, 255, 255, 0.34)',
+              },
+            ]}
+          />
+        )}
+        {enemy.kind === 'asteroid' ? (
+          <View style={styles.asteroidShell}>
+            <View style={styles.asteroidShadow} />
+            <View style={styles.asteroidHighlight} />
           <View style={styles.asteroidRidge} />
           <View style={styles.asteroidFacetA} />
           <View style={styles.asteroidFacetB} />

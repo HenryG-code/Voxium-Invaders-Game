@@ -10,7 +10,16 @@ export const SHIP_FRAME_HEIGHT = 138;
 export const SHIP_BOUNDING_WIDTH = 104;
 export const SHIP_MUZZLE_OFFSET = 12;
 export const SHIP_PIXEL_SIZE = 4;
-export const PLAYER_SHIP_IMAGE = require('../../assets/images/playerShip.png') as ImageSourcePropType;
+const WARDEN_SHIP_IMAGE = require('../../assets/images/Warden.png') as ImageSourcePropType;
+const RAPTOR_SHIP_IMAGE = require('../../assets/images/Raptor.png') as ImageSourcePropType;
+const VIPER_SHIP_IMAGE = require('../../assets/images/Viper.png') as ImageSourcePropType;
+const TEMPEST_SHIP_IMAGE = require('../../assets/images/Tempest.png') as ImageSourcePropType;
+const HELIOS_SHIP_IMAGE = require('../../assets/images/Helios.png') as ImageSourcePropType;
+const BASTION_SHIP_IMAGE = require('../../assets/images/Bastion.png') as ImageSourcePropType;
+const ATLAS_SHIP_IMAGE = require('../../assets/images/Atlas.png') as ImageSourcePropType;
+const NOVA_SHIP_IMAGE = require('../../assets/images/Nova.png') as ImageSourcePropType;
+const BOSS_STAGE_TWO_MODEL_IMAGE = require('../../assets/images/Boss2.png') as ImageSourcePropType;
+export const PLAYER_SHIP_IMAGE = WARDEN_SHIP_IMAGE;
 export const ENEMY_MODEL_IMAGE = require('../../assets/images/Enemy1.png') as ImageSourcePropType;
 export const ENEMY_STAGE_TWO_MODEL_IMAGE = require('../../assets/images/Enemy2.png') as ImageSourcePropType;
 export const PLAY_AREA_PADDING = 22;
@@ -32,13 +41,27 @@ export const MOVE_SOUND_COOLDOWN_MS = 140;
 export const FIRE_COOLDOWN_MS = 130;
 export const PULSE_FIRE_COOLDOWN_MS = 250;
 export const PULSE_CHARGE_MS = 320;
-export const MAX_ACTIVE_BULLETS = 10;
+export const MAX_ACTIVE_BULLETS = 20;
 export const COLLISION_BIN_WIDTH = 64;
 export const BULLET_WIDTH = 6;
 export const BULLET_HEIGHT = 24;
 export const PULSE_BULLET_WIDTH = 48;
 export const PULSE_BULLET_HEIGHT = 38;
 export const PULSE_BULLET_SPEED_PX_PER_MS = 0.8;
+export const MISSILE_BULLET_WIDTH = 10;
+export const MISSILE_BULLET_HEIGHT = 24;
+export const NEEDLE_BULLET_WIDTH = 4;
+export const NEEDLE_BULLET_HEIGHT = 30;
+export const ELECTRIC_ORB_BULLET_WIDTH = 18;
+export const ELECTRIC_ORB_BULLET_HEIGHT = 18;
+export const BEAM_BULLET_WIDTH = 18;
+export const BEAM_BULLET_HEIGHT = 132;
+export const PLASMA_PELLET_BULLET_WIDTH = 12;
+export const PLASMA_PELLET_BULLET_HEIGHT = 12;
+export const SEEKER_POD_BULLET_WIDTH = 16;
+export const SEEKER_POD_BULLET_HEIGHT = 22;
+export const NOVA_PULSE_BULLET_WIDTH = 8;
+export const NOVA_PULSE_BULLET_HEIGHT = 28;
 export const ENEMY_FRAME_WIDTH = 126;
 export const ENEMY_FRAME_HEIGHT = 69;
 export const ASTEROID_FRAME_SIZE = 84;
@@ -50,13 +73,22 @@ export const INITIAL_LIVES = 5;
 export const BOSS_SPAWN_KILL_THRESHOLD_STAGE_1 = 10;
 export const BOSS_SPAWN_KILL_THRESHOLD_STAGE_2 = 14;
 
-export type GameState = 'menu' | 'playing' | 'stageClear' | 'gameOver';
+export type GameState = 'menu' | 'playing' | 'paused' | 'stageClear' | 'gameOver';
 export type StarLayer = 'far' | 'mid' | 'near';
 export type MenuPanel = 'main' | 'options' | 'hangar' | 'credits' | 'records';
 export type ControlLayout = 'classic' | 'split';
 export type EnemyKind = 'grunt' | 'boss' | 'asteroid';
-export type BulletKind = 'standard' | 'pulse';
-export type EnemyVisualVariant = 'enemy1' | 'enemy2';
+export type BulletKind =
+  | 'standard'
+  | 'pulse'
+  | 'missile'
+  | 'needle'
+  | 'electricOrb'
+  | 'beam'
+  | 'plasmaPellet'
+  | 'seekerPod'
+  | 'novaPulse';
+export type EnemyVisualVariant = 'enemy1' | 'enemy2' | 'boss2';
 
 export type FlightStar = {
   id: number;
@@ -81,6 +113,11 @@ export type Bullet = {
   x: number;
   y: number;
   kind: BulletKind;
+  vx?: number;
+  damage?: number;
+  ageMs?: number;
+  maxAgeMs?: number;
+  pierce?: number;
 };
 
 export type Enemy = {
@@ -96,6 +133,7 @@ export type Enemy = {
   hp: number;
   fireClockMs: number;
   fireCooldownMs: number;
+  hitFlashMs: number;
 };
 
 export type Explosion = {
@@ -126,6 +164,7 @@ export type SceneState = {
   score: number;
   playerHp: number;
   playerShield: number;
+  playerDamageFlashMs: number;
   stage: number;
   stageKills: number;
   bossDefeated: boolean;
@@ -143,6 +182,8 @@ export type HeroShipProps = {
   shipLift?: number;
   scale?: number;
   decorative?: boolean;
+  damageFlashMs?: number;
+  modelKey?: string;
 };
 
 export type AlienInvaderProps = {
@@ -202,19 +243,99 @@ function clamp(value: number, min: number, max: number) {
 }
 
 function getBulletWidth(kind: BulletKind) {
-  return kind === 'pulse' ? PULSE_BULLET_WIDTH : BULLET_WIDTH;
+  switch (kind) {
+    case 'pulse':
+      return PULSE_BULLET_WIDTH;
+    case 'missile':
+      return MISSILE_BULLET_WIDTH;
+    case 'needle':
+      return NEEDLE_BULLET_WIDTH;
+    case 'electricOrb':
+      return ELECTRIC_ORB_BULLET_WIDTH;
+    case 'beam':
+      return BEAM_BULLET_WIDTH;
+    case 'plasmaPellet':
+      return PLASMA_PELLET_BULLET_WIDTH;
+    case 'seekerPod':
+      return SEEKER_POD_BULLET_WIDTH;
+    case 'novaPulse':
+      return NOVA_PULSE_BULLET_WIDTH;
+    case 'standard':
+    default:
+      return BULLET_WIDTH;
+  }
 }
 
 function getBulletHeight(kind: BulletKind) {
-  return kind === 'pulse' ? PULSE_BULLET_HEIGHT : BULLET_HEIGHT;
+  switch (kind) {
+    case 'pulse':
+      return PULSE_BULLET_HEIGHT;
+    case 'missile':
+      return MISSILE_BULLET_HEIGHT;
+    case 'needle':
+      return NEEDLE_BULLET_HEIGHT;
+    case 'electricOrb':
+      return ELECTRIC_ORB_BULLET_HEIGHT;
+    case 'beam':
+      return BEAM_BULLET_HEIGHT;
+    case 'plasmaPellet':
+      return PLASMA_PELLET_BULLET_HEIGHT;
+    case 'seekerPod':
+      return SEEKER_POD_BULLET_HEIGHT;
+    case 'novaPulse':
+      return NOVA_PULSE_BULLET_HEIGHT;
+    case 'standard':
+    default:
+      return BULLET_HEIGHT;
+  }
 }
 
 function getBulletSpeed(kind: BulletKind) {
-  return kind === 'pulse' ? PULSE_BULLET_SPEED_PX_PER_MS : BULLET_SPEED_PX_PER_MS;
+  switch (kind) {
+    case 'pulse':
+      return PULSE_BULLET_SPEED_PX_PER_MS;
+    case 'missile':
+      return 0.62;
+    case 'needle':
+      return 1.28;
+    case 'electricOrb':
+      return 0.72;
+    case 'beam':
+      return 1.18;
+    case 'plasmaPellet':
+      return 0.8;
+    case 'seekerPod':
+      return 0.56;
+    case 'novaPulse':
+      return 1.04;
+    case 'standard':
+    default:
+      return BULLET_SPEED_PX_PER_MS;
+  }
 }
 
 function getBulletDamage(kind: BulletKind) {
-  return kind === 'pulse' ? 2 : 1;
+  switch (kind) {
+    case 'pulse':
+      return 2;
+    case 'missile':
+      return 1.35;
+    case 'needle':
+      return 0.85;
+    case 'electricOrb':
+      return 1.15;
+    case 'beam':
+      return 0.7;
+    case 'plasmaPellet':
+      return 0.6;
+    case 'seekerPod':
+      return 1.4;
+    case 'novaPulse':
+      return 1.05;
+    case 'standard':
+    default:
+      return 1;
+  }
 }
 
 function getEnemyFrameWidth(kind: EnemyKind) {
@@ -242,7 +363,37 @@ function getEnemyDamage(kind: EnemyKind) {
 }
 
 function getEnemyModelImage(variant: EnemyVisualVariant) {
-  return variant === 'enemy2' ? ENEMY_STAGE_TWO_MODEL_IMAGE : ENEMY_MODEL_IMAGE;
+  if (variant === 'enemy2') {
+    return ENEMY_STAGE_TWO_MODEL_IMAGE;
+  }
+
+  if (variant === 'boss2') {
+    return BOSS_STAGE_TWO_MODEL_IMAGE;
+  }
+
+  return ENEMY_MODEL_IMAGE;
+}
+
+function getShipModelImage(modelKey?: string) {
+  switch (modelKey) {
+    case 'Raptor':
+      return RAPTOR_SHIP_IMAGE;
+    case 'Viper':
+      return VIPER_SHIP_IMAGE;
+    case 'Tempest':
+      return TEMPEST_SHIP_IMAGE;
+    case 'Helios':
+      return HELIOS_SHIP_IMAGE;
+    case 'Bastion':
+      return BASTION_SHIP_IMAGE;
+    case 'Atlas':
+      return ATLAS_SHIP_IMAGE;
+    case 'Nova':
+      return NOVA_SHIP_IMAGE;
+    case 'Warden':
+    default:
+      return WARDEN_SHIP_IMAGE;
+  }
 }
 
 function createExplosion(
@@ -372,8 +523,8 @@ function createEnemy(
     y:
       kind === 'boss'
         ? stage >= 2
-          ? 34
-          : 42
+          ? 164
+          : 176
         : kind === 'asteroid'
           ? 8
           : 10,
@@ -396,8 +547,15 @@ function createEnemy(
           ? 0.82 + Math.random() * 0.4
           : 0.9 + Math.random() * 0.28,
     wobblePhase: Math.random() * Math.PI * 2,
-    modelVariant: kind === 'grunt' && stage >= 2 ? 'enemy2' : 'enemy1',
-    hp: kind === 'boss' ? BOSS_HP : kind === 'asteroid' ? 2 : 1,
+    modelVariant:
+      kind === 'boss'
+        ? stage >= 2
+          ? 'boss2'
+          : 'enemy1'
+        : kind === 'grunt' && stage >= 2
+          ? 'enemy2'
+          : 'enemy1',
+    hp: kind === 'boss' ? BOSS_HP : stage >= 2 ? 2 : kind === 'asteroid' ? 2 : 1,
     fireClockMs: Math.random() * 800,
     fireCooldownMs:
       kind === 'boss'
@@ -405,6 +563,7 @@ function createEnemy(
         : stage >= 2
           ? 1900 + Math.random() * 800
           : 2600 + Math.random() * 1100,
+    hitFlashMs: 0,
   };
 }
 
@@ -431,6 +590,7 @@ export {
   getEnemyScore,
   getEnemyDamage,
   getEnemyModelImage,
+  getShipModelImage,
   createExplosion,
   applyPlayerDamage,
   spreadFromCenter,

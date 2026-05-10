@@ -1,26 +1,29 @@
 import { useIsFocused } from '@react-navigation/native';
-import { setAudioModeAsync, useAudioPlayer } from 'expo-audio';
 import Constants from 'expo-constants';
 import { useRouter } from 'expo-router';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   GestureResponderEvent,
   LayoutChangeEvent,
   Pressable,
-  ScrollView,
   StyleSheet,
   Text,
   useWindowDimensions,
   View,
 } from 'react-native';
-import MaterialIcons from '@expo/vector-icons/MaterialIcons';
 
+import { GameControls } from '@/components/game/GameControls';
+import { GameHUD } from '@/components/game/GameHUD';
+import { GameMenu } from '@/components/game/GameMenu';
+import { GameOverScreen } from '@/components/game/GameOverScreen';
+import { StageClearScreen } from '@/components/game/StageClearScreen';
 import { AlienInvader, HeroShip } from '@/components/game/game-actors';
 import { playSoundSafely, resetSoundSafely } from '@/components/game/game-audio';
 import {
+  getNextUnlockHangarShip,
+  getNewlyUnlockedHangarShips,
+  getStageClearanceAfterClear,
   getUnlockedHangarShips,
-  HANGAR_SHIPS,
-  HANGAR_STAGE_CLEARANCE,
 } from '@/components/game/hangar-data';
 import {
   advanceBossLasers,
@@ -40,8 +43,6 @@ import {
   BULLET_HEIGHT,
   BULLET_WIDTH,
   Bullet,
-  CREDITS_BLOCK_TEXT,
-  ControlLayout,
   createEnemy,
   createExplosion,
   createForegroundStreaks,
@@ -65,9 +66,7 @@ import {
   getEnemyFrameHeight,
   getEnemyFrameWidth,
   getEnemyScore,
-  INITIAL_LIVES,
   MAX_ACTIVE_BULLETS,
-  MAX_SHIELD_POINTS,
   MenuPanel,
   MID_STAR_COUNT,
   MOVE_SOUND_COOLDOWN_MS,
@@ -87,7 +86,6 @@ import {
   SPEED_LINE_COUNT,
   SHIP_COLLISION_HEIGHT,
   BulletKind,
-  TOUCH_CONTROL_HEIGHT,
   clamp,
   getEnemyCenterX,
   getEnemyCenterY,
@@ -95,38 +93,47 @@ import {
 import {
   getBossSpawnThreshold,
   getNextEnemySpawnDelay,
-  getStageClearMessage,
-  getStageClearPrimaryLabel,
-  getStageClearSecondaryLabel,
-  getStageClearTitle,
-  getStageHudSubtitle,
 } from '@/components/game/game-stage';
-import {
-  getActiveShipId,
-  getShipGameplayProfile,
-} from '@/components/game/ship-loadout';
+import { getShipGameplayProfile } from '@/components/game/ship-loadout';
+import { useGameAudio } from '@/hooks/useGameAudio';
+import { useGameStorage } from '@/hooks/useGameStorage';
 
 export default function HomeScreen() {
   const router = useRouter();
   const isFocused = useIsFocused();
   const { width, height } = useWindowDimensions();
+  const {
+    activeShipId,
+    controlLayout,
+    highScore,
+    highestClearedStage: stageClearance,
+    isMusicEnabled,
+    isSfxEnabled,
+    lastRunScore,
+    refreshActiveShip,
+    setControlLayout,
+    setHighScore,
+    setHighestClearedStage,
+    setIsMusicEnabled,
+    setIsSfxEnabled,
+    setLastRunScore,
+  } = useGameStorage();
+  const shipProfile = getShipGameplayProfile(activeShipId);
   const [gameState, setGameState] = useState<GameState>("menu");
   const [menuPanel, setMenuPanel] = useState<MenuPanel>("main");
-  const [isMusicEnabled, setIsMusicEnabled] = useState(true);
-  const [isSfxEnabled, setIsSfxEnabled] = useState(true);
-  const [controlLayout, setControlLayout] = useState<ControlLayout>("classic");
-  const [highScore, setHighScore] = useState(0);
-  const [lastRunScore, setLastRunScore] = useState(0);
+  const [stageClearAnnouncement, setStageClearAnnouncement] = useState<string | null>(null);
   const [shipOffset, setShipOffset] = useState(0);
   const [isBoosting, setIsBoosting] = useState(false);
   const [isFireHeld, setIsFireHeld] = useState(false);
   const [playAreaHeight, setPlayAreaHeight] = useState(0);
+  const [screenShakeMs, setScreenShakeMs] = useState(0);
   const [scene, setScene] = useState<SceneState>({
     elapsedMs: 0,
     travel: 0,
     score: 0,
-    playerHp: INITIAL_LIVES,
+    playerHp: shipProfile.playerHp,
     playerShield: 0,
+    playerDamageFlashMs: 0,
     stage: BOSS_STAGE,
     stageKills: 0,
     bossDefeated: false,
@@ -134,10 +141,8 @@ export default function HomeScreen() {
     enemies: [],
     bossLasers: [],
     explosions: [],
-    lives: INITIAL_LIVES,
+    lives: shipProfile.playerHp,
   });
-  const [activeShipId, setActiveShipId] = useState(getActiveShipId());
-
   const boostRef = useRef(isBoosting);
   const isSfxEnabledRef = useRef(isSfxEnabled);
   const gameStateRef = useRef<GameState>(gameState);
@@ -163,28 +168,26 @@ export default function HomeScreen() {
   const pulseModeRef = useRef(false);
   const fireHoldStartAtRef = useRef(0);
   const handledMainMenuReturnRequestRef = useRef(0);
+  const previousSceneSnapshotRef = useRef(scene);
+  const heldMoveDirectionRef = useRef<0 | -1 | 1>(0);
+  const targetShipOffsetRef = useRef(0);
 
-  const firePlayer = useAudioPlayer(
-    require("../../assets/sounds/Blaster1.wav"),
-  );
-  const pulsePlayer = useAudioPlayer(
-    require("../../assets/sounds/Pulseattack.wav"),
-  );
-  const boostPlayer = useAudioPlayer(require("../../assets/sounds/Boost.wav"));
-  const movePlayer = useAudioPlayer(require("../../assets/sounds/Move.wav"));
-  const destroyPlayer = useAudioPlayer(
-    require("../../assets/sounds/Destroy1.wav"),
-  );
-  const bossPlayer = useAudioPlayer(require("../../assets/sounds/Boss1.wav"));
-  const wavePlayer = useAudioPlayer(
-    require("../../assets/sounds/Waveattack.wav"),
-  );
-  const menuMusicPlayer = useAudioPlayer(
-    require("../../assets/sounds/Mainmenusong.mp3"),
-  );
-  const stageMusicPlayer = useAudioPlayer(
-    require("../../assets/sounds/Stage1song.mp3"),
-  );
+  const {
+    bossPlayer,
+    bossDestroyedPlayer,
+    boostPlayer,
+    destroyPlayer,
+    firePlayer,
+    movePlayer,
+    playerDeathPlayer,
+    pulsePlayer,
+    wavePlayer,
+  } = useGameAudio({
+    gameState,
+    isMusicEnabled,
+    isSfxEnabled,
+    stage: scene.stage,
+  });
 
   const maxShipOffset = Math.max(
     0,
@@ -205,27 +208,135 @@ export default function HomeScreen() {
     () => createForegroundStreaks(FOREGROUND_STREAK_COUNT),
     [],
   );
-  const shipProfile = getShipGameplayProfile(activeShipId);
   const {
-    moveStep,
+    moveSpeedPxPerMs,
     pulseChargeMs,
     standardFireCooldownMs,
-    shipScale,
     shipBankMultiplier,
     shipLiftOffset,
+    shipScale,
+    playerHp,
+    shieldPoints,
   } = shipProfile;
   const unlockedHangarShips = useMemo(
-    () => getUnlockedHangarShips(HANGAR_STAGE_CLEARANCE),
-    [],
+    () => getUnlockedHangarShips(stageClearance),
+    [stageClearance],
   );
   const nextUnlockShip = useMemo(
-    () =>
-      HANGAR_SHIPS.find(
-        (ship) => ship.unlockStage > HANGAR_STAGE_CLEARANCE,
-      ) ?? null,
-    [],
+    () => getNextUnlockHangarShip(stageClearance),
+    [stageClearance],
   );
-  const appVersion = Constants.expoConfig?.version ?? "0.1.11";
+  const appVersion = Constants.expoConfig?.version ?? "0.1.17";
+  const movementLockedWhileFiring = activeShipId === "helios" && isFireHeld;
+  const playerFlightBaseLift = -88;
+
+  const buildShotsForAttack = useCallback(
+    (attackMode: "standard" | "alt", muzzleOriginY: number, originX: number) => {
+      const bullets: Bullet[] = [];
+      const pushBullet = (
+        kind: BulletKind,
+        options?: {
+          damage?: number;
+          maxAgeMs?: number;
+          offsetX?: number;
+          offsetY?: number;
+          pierce?: number;
+          vx?: number;
+        },
+      ) => {
+        const bulletHeight = getBulletHeight(kind);
+        bullets.push({
+          id: bulletIdRef.current++,
+          x: originX + (options?.offsetX ?? 0),
+          y:
+            muzzleOriginY -
+            Math.max(0, bulletHeight - BULLET_HEIGHT) / 2 +
+            (options?.offsetY ?? 0),
+          kind,
+          vx: options?.vx,
+          damage: options?.damage,
+          ageMs: 0,
+          maxAgeMs: options?.maxAgeMs,
+          pierce: options?.pierce,
+        });
+      };
+
+      switch (activeShipId) {
+        case "raptor":
+          if (attackMode === "alt") {
+            pushBullet("missile", { offsetX: -18, vx: -0.12, damage: 1.05, maxAgeMs: 1500 });
+            pushBullet("missile", { offsetX: -6, vx: -0.04, damage: 1.1, maxAgeMs: 1500 });
+            pushBullet("missile", { offsetX: 6, vx: 0.04, damage: 1.1, maxAgeMs: 1500 });
+            pushBullet("missile", { offsetX: 18, vx: 0.12, damage: 1.05, maxAgeMs: 1500 });
+          } else {
+            pushBullet("missile", { damage: 1.3, maxAgeMs: 1500 });
+          }
+          break;
+        case "viper":
+          if (attackMode === "alt") {
+            pushBullet("needle", { offsetX: -8, vx: -0.05, damage: 0.78 });
+            pushBullet("needle", { damage: 0.82 });
+            pushBullet("needle", { offsetX: 8, vx: 0.05, damage: 0.78 });
+          } else {
+            pushBullet("needle", { damage: 0.9 });
+          }
+          break;
+        case "tempest":
+          if (attackMode === "alt") {
+            pushBullet("electricOrb", { offsetX: -10, vx: -0.03, damage: 1.3, pierce: 1 });
+            pushBullet("electricOrb", { offsetX: 10, vx: 0.03, damage: 1.3, pierce: 1 });
+          } else {
+            pushBullet("electricOrb", { damage: 1.1 });
+          }
+          break;
+        case "helios":
+          pushBullet("beam", { damage: 0.7, maxAgeMs: 120, pierce: 8 });
+          break;
+        case "bastion":
+          if (attackMode === "alt") {
+            pushBullet("plasmaPellet", { offsetX: -18, vx: -0.18, damage: 0.46 });
+            pushBullet("plasmaPellet", { offsetX: -9, vx: -0.09, damage: 0.5 });
+            pushBullet("plasmaPellet", { damage: 0.55 });
+            pushBullet("plasmaPellet", { offsetX: 9, vx: 0.09, damage: 0.5 });
+            pushBullet("plasmaPellet", { offsetX: 18, vx: 0.18, damage: 0.46 });
+          } else {
+            pushBullet("plasmaPellet", { offsetX: -10, vx: -0.1, damage: 0.58 });
+            pushBullet("plasmaPellet", { damage: 0.64 });
+            pushBullet("plasmaPellet", { offsetX: 10, vx: 0.1, damage: 0.58 });
+          }
+          break;
+        case "atlas":
+          if (attackMode === "alt") {
+            pushBullet("seekerPod", { offsetX: -12, damage: 1.25, maxAgeMs: 2200 });
+            pushBullet("seekerPod", { damage: 1.35, maxAgeMs: 2200 });
+            pushBullet("seekerPod", { offsetX: 12, damage: 1.25, maxAgeMs: 2200 });
+          } else {
+            pushBullet("seekerPod", { damage: 1.4, maxAgeMs: 2200 });
+          }
+          break;
+        case "nova":
+          if (attackMode === "alt") {
+            pushBullet("pulse", { offsetX: -14, damage: 1.8 });
+            pushBullet("pulse", { offsetX: 14, damage: 1.8 });
+          } else {
+            pushBullet("novaPulse", { offsetX: -12, damage: 1.08 });
+            pushBullet("novaPulse", { offsetX: 12, damage: 1.08 });
+          }
+          break;
+        case "warden":
+        default:
+          if (attackMode === "alt") {
+            pushBullet("pulse", { damage: 2 });
+          } else {
+            pushBullet("standard", { damage: 1 });
+          }
+          break;
+      }
+
+      return bullets;
+    },
+    [activeShipId],
+  );
 
   useEffect(() => {
     boostRef.current = isBoosting;
@@ -263,105 +374,78 @@ export default function HomeScreen() {
     setShipOffset((currentOffset) =>
       Math.max(-maxShipOffset, Math.min(maxShipOffset, currentOffset)),
     );
+    targetShipOffsetRef.current = clamp(
+      targetShipOffsetRef.current,
+      -maxShipOffset,
+      maxShipOffset,
+    );
   }, [maxShipOffset]);
-
-  useEffect(() => {
-    firePlayer.volume = 0.55;
-    pulsePlayer.volume = 0.45;
-    boostPlayer.volume = 0.4;
-    movePlayer.volume = 0.28;
-    destroyPlayer.volume = 0.38;
-    bossPlayer.volume = 0.5;
-    wavePlayer.volume = 0.34;
-    menuMusicPlayer.volume = 0.22;
-    stageMusicPlayer.volume = 0.12;
-    menuMusicPlayer.loop = true;
-    stageMusicPlayer.loop = true;
-  }, [
-    boostPlayer,
-    destroyPlayer,
-    bossPlayer,
-    firePlayer,
-    menuMusicPlayer,
-    movePlayer,
-    pulsePlayer,
-    wavePlayer,
-    stageMusicPlayer,
-  ]);
-
-  useEffect(() => {
-    void setAudioModeAsync({
-      playsInSilentMode: true,
-      interruptionMode: "mixWithOthers",
-    }).catch(() => {});
-  }, [destroyPlayer]);
-
-  useEffect(() => {
-    if (!isMusicEnabled) {
-      void resetSoundSafely(menuMusicPlayer);
-      void resetSoundSafely(stageMusicPlayer);
-      return;
-    }
-
-    if (gameState === "menu") {
-      void resetSoundSafely(stageMusicPlayer);
-      void playSoundSafely(menuMusicPlayer, true, false);
-      return;
-    }
-
-    void resetSoundSafely(menuMusicPlayer);
-    void playSoundSafely(stageMusicPlayer, true, false);
-  }, [gameState, isMusicEnabled, menuMusicPlayer, stageMusicPlayer]);
-
-  useEffect(() => {
-    if (!isSfxEnabled) {
-      void resetSoundSafely(boostPlayer);
-      void resetSoundSafely(movePlayer);
-      void resetSoundSafely(firePlayer);
-      void resetSoundSafely(pulsePlayer);
-      void resetSoundSafely(destroyPlayer);
-      void resetSoundSafely(bossPlayer);
-      void resetSoundSafely(wavePlayer);
-    }
-  }, [
-    bossPlayer,
-    boostPlayer,
-    destroyPlayer,
-    firePlayer,
-    isSfxEnabled,
-    movePlayer,
-    pulsePlayer,
-    wavePlayer,
-  ]);
 
   useEffect(() => {
     if (scene.score > highScore) {
       setHighScore(scene.score);
     }
-  }, [highScore, scene.score]);
+  }, [highScore, scene.score, setHighScore]);
 
   useEffect(() => {
-    if (!isFocused) {
+    if (screenShakeMs <= 0) {
       return;
     }
 
-    setActiveShipId(getActiveShipId());
+    let frameId = 0;
+    let previousTime = 0;
 
-    const requestId = getMainMenuReturnRequestId();
-    if (
-      requestId === 0 ||
-      requestId === handledMainMenuReturnRequestRef.current
-    ) {
-      return;
-    }
+    const animateShake = (time: number) => {
+      if (!previousTime) {
+        previousTime = time;
+      }
 
-    handledMainMenuReturnRequestRef.current = requestId;
-    setLastRunScore(sceneRef.current.score);
-    setGameState("menu");
-    setMenuPanel("main");
-    resetRunState();
-    void resetSoundSafely(boostPlayer);
-  }, [boostPlayer, isFocused]);
+      const deltaMs = Math.min(34, time - previousTime);
+      previousTime = time;
+
+      setScreenShakeMs((currentMs) => {
+        if (currentMs <= 0) {
+          return 0;
+        }
+
+        return Math.max(0, currentMs - deltaMs);
+      });
+
+      frameId = requestAnimationFrame(animateShake);
+    };
+
+    frameId = requestAnimationFrame(animateShake);
+    return () => cancelAnimationFrame(frameId);
+  }, [screenShakeMs]);
+
+  const applyShipOffset = useCallback(
+    (nextOffset: number) => {
+      const clampedOffset = clamp(nextOffset, -maxShipOffset, maxShipOffset);
+      const previousOffset = shipOffsetRef.current;
+
+      if (clampedOffset === previousOffset) {
+        return;
+      }
+
+      const direction: 0 | -1 | 1 = clampedOffset > previousOffset ? 1 : -1;
+      shipOffsetRef.current = clampedOffset;
+      setShipOffset(clampedOffset);
+
+      if (
+        sceneRef.current.elapsedMs - lastMoveSoundAtRef.current >
+        MOVE_SOUND_COOLDOWN_MS
+      ) {
+        lastMoveAtRef.current = sceneRef.current.elapsedMs;
+        lastMoveDirectionRef.current = direction;
+        lastMoveSoundAtRef.current = sceneRef.current.elapsedMs;
+        void playSoundSafely(movePlayer, isSfxEnabledRef.current, true, false);
+      } else {
+        lastMoveAtRef.current = sceneRef.current.elapsedMs;
+        lastMoveDirectionRef.current = direction;
+      }
+    },
+    [maxShipOffset, movePlayer],
+  );
 
   useEffect(() => {
     let frameId = 0;
@@ -376,10 +460,33 @@ export default function HomeScreen() {
       previousTime = time;
 
       if (gameStateRef.current === "playing") {
-        let shouldPlayDestroySound = false;
-        let shouldPlayPulseSound = false;
-        let shouldPlayWaveSound = false;
-        let shouldPlayBossSound = false;
+        const isMovementLocked = activeShipId === "helios" && isFireHeldRef.current;
+
+        if (isMovementLocked) {
+          heldMoveDirectionRef.current = 0;
+          targetShipOffsetRef.current = shipOffsetRef.current;
+        } else if (heldMoveDirectionRef.current !== 0) {
+          targetShipOffsetRef.current = clamp(
+            shipOffsetRef.current + heldMoveDirectionRef.current * moveSpeedPxPerMs * deltaMs,
+            -maxShipOffset,
+            maxShipOffset,
+          );
+        }
+
+        const offsetDelta = targetShipOffsetRef.current - shipOffsetRef.current;
+        if (Math.abs(offsetDelta) > 0.01) {
+          const responseMultiplier =
+            heldMoveDirectionRef.current !== 0
+              ? 1.14
+              : Math.min(1.85, 1 + Math.abs(offsetDelta) / 72);
+          const movementStep = moveSpeedPxPerMs * deltaMs * responseMultiplier;
+          const nextOffset =
+            Math.abs(offsetDelta) <= movementStep
+              ? targetShipOffsetRef.current
+              : shipOffsetRef.current + Math.sign(offsetDelta) * movementStep;
+          applyShipOffset(nextOffset);
+        }
+
         let shouldEnterStageClear = false;
         enemySpawnClockRef.current += deltaMs;
 
@@ -402,8 +509,12 @@ export default function HomeScreen() {
           const spawnedBossLasers: BossLaser[] = [];
           const nextElapsedMs = currentScene.elapsedMs + deltaMs;
           let nextScore = currentScene.score || 0;
-          let nextPlayerHp = currentScene.playerHp ?? INITIAL_LIVES;
+          let nextPlayerHp = currentScene.playerHp ?? playerHp;
           let nextPlayerShield = currentScene.playerShield || 0;
+          let nextPlayerDamageFlashMs = Math.max(
+            0,
+            (currentScene.playerDamageFlashMs || 0) - deltaMs,
+          );
           let nextStageKills = currentScene.stageKills || 0;
           let bossDefeated = currentScene.bossDefeated || false;
           const bossSpawnThreshold = getBossSpawnThreshold(currentStage);
@@ -418,7 +529,9 @@ export default function HomeScreen() {
             activePlayAreaHeight -
             PLAY_AREA_BOTTOM_PADDING -
             SHIP_FRAME_HEIGHT / 2 +
-            (boostRef.current ? -16 : 0);
+            playerFlightBaseLift +
+            (boostRef.current ? -16 : 0) +
+            shipLiftOffset;
 
           const queueExplosion = (
             x: number,
@@ -430,52 +543,58 @@ export default function HomeScreen() {
             );
           };
 
-          const queuePlayerShot = (kind: BulletKind) => {
+          const queuePlayerShot = (attackMode: "standard" | "alt") => {
             const cooldown =
-              kind === "pulse"
-                ? pulseChargeMs
-                : standardFireCooldownMs;
+              activeShipId === "helios"
+                ? standardFireCooldownMs
+                : attackMode === "alt"
+                  ? pulseChargeMs
+                  : standardFireCooldownMs;
 
             if (nextElapsedMs - lastFireAtRef.current < cooldown) {
               return false;
             }
 
+            const currentShipLift = (boostRef.current ? -16 : 0) + shipLiftOffset;
+            const muzzleOriginY =
+              activePlayAreaHeight -
+              PLAY_AREA_BOTTOM_PADDING -
+              SHIP_FRAME_HEIGHT +
+              playerFlightBaseLift +
+              SHIP_MUZZLE_OFFSET +
+              currentShipLift;
+            const nextShots = buildShotsForAttack(
+              attackMode,
+              muzzleOriginY,
+              shipOffsetRef.current,
+            );
+
             if (
-              currentScene.bullets.length + spawnedBullets.length >=
-              MAX_ACTIVE_BULLETS
+              nextShots.length === 0 ||
+              currentScene.bullets.length + spawnedBullets.length + nextShots.length >
+                MAX_ACTIVE_BULLETS
             ) {
               return false;
             }
 
-            const bulletHeight = getBulletHeight(kind);
-            const currentShipLift = boostRef.current ? -16 : 0;
-            const bulletStartY =
-              activePlayAreaHeight -
-              PLAY_AREA_BOTTOM_PADDING -
-              SHIP_FRAME_HEIGHT +
-              SHIP_MUZZLE_OFFSET +
-              currentShipLift -
-              Math.max(0, bulletHeight - BULLET_HEIGHT) / 2;
-
-            spawnedBullets.push({
-              id: bulletIdRef.current++,
-              x: shipOffsetRef.current,
-              y: bulletStartY,
-              kind,
-            });
+            spawnedBullets.push(...nextShots);
             lastFireAtRef.current = nextElapsedMs;
             return true;
           };
 
           if (isFireHeldRef.current) {
-            const heldDuration = nextElapsedMs - fireHoldStartAtRef.current;
+            if (activeShipId === "helios") {
+              queuePlayerShot("standard");
+            } else {
+              const heldDuration = nextElapsedMs - fireHoldStartAtRef.current;
 
-            if (heldDuration >= pulseChargeMs) {
-              pulseModeRef.current = true;
-            }
+              if (heldDuration >= pulseChargeMs) {
+                pulseModeRef.current = true;
+              }
 
-            if (pulseModeRef.current && queuePlayerShot("pulse")) {
-              shouldPlayPulseSound = true;
+              if (pulseModeRef.current && queuePlayerShot("alt")) {
+                // Alt-shot audio is handled after state updates by observing spawned bullets.
+              }
             }
           }
 
@@ -493,7 +612,6 @@ export default function HomeScreen() {
               );
               bossSpawnedRef.current = true;
               shouldSpawnBoss = false;
-              shouldPlayBossSound = true;
               break;
             } else {
               const activeHostileCount = currentScene.enemies.filter(
@@ -514,7 +632,6 @@ export default function HomeScreen() {
                     currentStage,
                   ),
                 );
-                shouldPlayWaveSound = true;
               }
             }
 
@@ -524,9 +641,17 @@ export default function HomeScreen() {
           for (const enemy of currentScene.enemies) {
             const advancedEnemy: Enemy = {
               ...enemy,
-              x: enemy.x + enemy.drift * deltaMs,
+              x:
+                enemy.kind === "boss"
+                  ? Math.sin(nextElapsedMs / 1200 + enemy.wobblePhase) *
+                    Math.max(
+                      28,
+                      contentWidthRef.current * 0.22,
+                    )
+                  : enemy.x + enemy.drift * deltaMs,
               y: enemy.y + enemy.speed * deltaMs,
               fireClockMs: enemy.fireClockMs + deltaMs,
+              hitFlashMs: Math.max(0, (enemy.hitFlashMs || 0) - deltaMs),
             };
 
             if (
@@ -598,17 +723,14 @@ export default function HomeScreen() {
             }
 
             hitEnemyIds.add(enemy.id);
-            shouldPlayDestroySound = true;
             nextScore += getEnemyScore(enemy.kind);
 
             if (enemy.kind === "boss") {
               bossDefeated = true;
               shouldEnterStageClear = true;
-              nextPlayerShield = clamp(
-                nextPlayerShield + MAX_SHIELD_POINTS,
-                0,
-                MAX_SHIELD_POINTS,
-              );
+              if (currentStage === BOSS_STAGE) {
+                nextPlayerShield = shieldPoints;
+              }
             } else {
               nextStageKills += 1;
             }
@@ -619,12 +741,53 @@ export default function HomeScreen() {
           for (const bullet of currentScene.bullets) {
             const bulletWidth = getBulletWidth(bullet.kind);
             const bulletHeight = getBulletHeight(bullet.kind);
-            const nextBullet = {
+            const nextBullet: Bullet = {
               ...bullet,
-              y: bullet.y - deltaMs * getBulletSpeed(bullet.kind),
+              ageMs: (bullet.ageMs ?? 0) + deltaMs,
             };
 
-            if (nextBullet.y + bulletHeight <= -40) {
+            if (bullet.kind === "seekerPod") {
+              let nearestEnemy: EnemyCollisionCandidate | null = null;
+
+              for (const enemy of advancedEnemies) {
+                if (hitEnemyIds.has(enemy.id)) {
+                  continue;
+                }
+
+                const centerX = getEnemyCenterX(enemy, nextElapsedMs);
+                const centerY = getEnemyCenterY(enemy, nextElapsedMs);
+                const distance = Math.hypot(centerX - nextBullet.x, centerY - nextBullet.y);
+
+                if (!nearestEnemy || distance < Math.hypot(nearestEnemy.centerX - nextBullet.x, nearestEnemy.centerY - nextBullet.y)) {
+                  nearestEnemy = {
+                    enemy,
+                    centerX,
+                    centerY,
+                    halfWidth: 0,
+                    halfHeight: 0,
+                  };
+                }
+              }
+
+              if (nearestEnemy) {
+                const desiredVx = clamp(
+                  (nearestEnemy.centerX - nextBullet.x) * 0.0055,
+                  -0.24,
+                  0.24,
+                );
+                nextBullet.vx = (nextBullet.vx ?? 0) * 0.7 + desiredVx * 0.3;
+              }
+            }
+
+            nextBullet.x += (nextBullet.vx ?? 0) * deltaMs;
+            nextBullet.y -= deltaMs * getBulletSpeed(bullet.kind);
+
+            if (
+              nextBullet.y + bulletHeight <= -80 ||
+              nextBullet.x < -contentWidthRef.current * 0.7 ||
+              nextBullet.x > contentWidthRef.current * 0.7 ||
+              (nextBullet.maxAgeMs != null && (nextBullet.ageMs ?? 0) >= nextBullet.maxAgeMs)
+            ) {
               continue;
             }
 
@@ -650,21 +813,41 @@ export default function HomeScreen() {
               }
 
               checkedEnemyIds.add(enemy.id);
+              const hitPaddingX =
+                bullet.kind === "pulse"
+                  ? 26
+                  : bullet.kind === "beam"
+                    ? 12
+                    : bullet.kind === "electricOrb"
+                      ? 10
+                      : bullet.kind === "seekerPod"
+                        ? 8
+                        : 0;
+              const hitPaddingY =
+                bullet.kind === "pulse"
+                  ? 18
+                  : bullet.kind === "beam"
+                    ? 22
+                    : bullet.kind === "electricOrb"
+                      ? 10
+                      : bullet.kind === "plasmaPellet"
+                        ? 4
+                        : 0;
 
               const bulletHitX =
                 Math.abs(nextBullet.x - candidate.centerX) <=
                 candidate.halfWidth +
                   bulletWidth / 2 +
-                  (bullet.kind === "pulse" ? 26 : 0);
+                  hitPaddingX;
               const bulletHitY =
                 Math.abs(bulletCenterY - candidate.centerY) <=
                 candidate.halfHeight +
                   bulletHeight / 2 +
-                  (bullet.kind === "pulse" ? 18 : 0);
+                  hitPaddingY;
 
               if (bulletHitX && bulletHitY) {
                 impactedCandidates.push(candidate);
-                if (bullet.kind !== "pulse") {
+                if ((bullet.pierce ?? 0) <= 0 && bullet.kind !== "pulse") {
                   break;
                 }
               }
@@ -672,7 +855,7 @@ export default function HomeScreen() {
 
             if (impactedCandidates.length > 0) {
               didHitEnemy = true;
-              const bulletDamage = getBulletDamage(bullet.kind);
+              const bulletDamage = bullet.damage ?? getBulletDamage(bullet.kind);
 
               for (const candidate of impactedCandidates) {
                 if (hitEnemyIds.has(candidate.enemy.id)) {
@@ -681,8 +864,19 @@ export default function HomeScreen() {
 
                 if (candidate.enemy.hp > bulletDamage) {
                   candidate.enemy.hp -= bulletDamage;
+                  candidate.enemy.hitFlashMs = 180;
                 } else {
                   resolveEnemyKill(candidate);
+                }
+              }
+
+              if ((nextBullet.pierce ?? 0) > 0) {
+                nextBullet.pierce = Math.max(
+                  0,
+                  (nextBullet.pierce ?? 0) - impactedCandidates.length,
+                );
+                if ((nextBullet.pierce ?? 0) > 0) {
+                  survivingBullets.push(nextBullet);
                 }
               }
             }
@@ -716,7 +910,7 @@ export default function HomeScreen() {
               );
               nextPlayerShield = damageResult.playerShield;
               nextPlayerHp = damageResult.playerHp;
-              shouldPlayDestroySound = true;
+              nextPlayerDamageFlashMs = 240;
               queueExplosion(centerX, centerY, enemy.kind);
               continue;
             }
@@ -729,6 +923,7 @@ export default function HomeScreen() {
               );
               nextPlayerShield = damageResult.playerShield;
               nextPlayerHp = damageResult.playerHp;
+              nextPlayerDamageFlashMs = 240;
               continue;
             }
 
@@ -754,6 +949,7 @@ export default function HomeScreen() {
             );
             nextPlayerShield = damageResult.playerShield;
             nextPlayerHp = damageResult.playerHp;
+            nextPlayerDamageFlashMs = 240;
             laser.hasHitPlayer = true;
           }
 
@@ -767,6 +963,7 @@ export default function HomeScreen() {
               score: nextScore,
               playerHp: nextPlayerHp,
               playerShield: nextPlayerShield,
+              playerDamageFlashMs: nextPlayerDamageFlashMs,
               stage: currentStage,
               stageKills: nextStageKills,
               bossDefeated,
@@ -787,6 +984,7 @@ export default function HomeScreen() {
             score: nextScore,
             playerHp: nextPlayerHp,
             playerShield: nextPlayerShield,
+            playerDamageFlashMs: nextPlayerDamageFlashMs,
             stage: currentStage,
             stageKills: nextStageKills,
             bossDefeated,
@@ -797,24 +995,6 @@ export default function HomeScreen() {
             lives: nextPlayerHp,
           };
         });
-
-        if (shouldPlayDestroySound) {
-      void playSoundSafely(destroyPlayer, isSfxEnabledRef.current);
-        }
-
-        if (shouldPlayPulseSound) {
-          void resetSoundSafely(firePlayer);
-          void playSoundSafely(pulsePlayer, isSfxEnabledRef.current);
-        }
-
-        if (shouldPlayWaveSound) {
-          void playSoundSafely(wavePlayer, isSfxEnabledRef.current);
-        }
-
-        if (shouldPlayBossSound) {
-          void playSoundSafely(bossPlayer, isSfxEnabledRef.current);
-        }
-
       }
 
       frameId = requestAnimationFrame(animate);
@@ -824,13 +1004,70 @@ export default function HomeScreen() {
 
     return () => cancelAnimationFrame(frameId);
   }, [
+    applyShipOffset,
+    activeShipId,
+    buildShotsForAttack,
+    maxShipOffset,
+    moveSpeedPxPerMs,
+    pulseChargeMs,
+    playerHp,
+    playerFlightBaseLift,
+    standardFireCooldownMs,
+    shieldPoints,
+    shipLiftOffset,
+  ]);
+
+  useEffect(() => {
+    const previousScene = previousSceneSnapshotRef.current;
+
+    if (gameState === "playing") {
+      const previousEnemyIds = new Set(previousScene.enemies.map((enemy) => enemy.id));
+      const previousBulletIds = new Set(previousScene.bullets.map((bullet) => bullet.id));
+      const spawnedBoss = scene.enemies.some(
+        (enemy) => enemy.kind === "boss" && !previousEnemyIds.has(enemy.id),
+      );
+      const spawnedHostile = scene.enemies.some(
+        (enemy) => enemy.kind !== "boss" && !previousEnemyIds.has(enemy.id),
+      );
+      const spawnedPulseBullet = scene.bullets.some(
+        (bullet) => bullet.kind === "pulse" && !previousBulletIds.has(bullet.id),
+      );
+      const explosionSpawned = scene.explosions.length > previousScene.explosions.length;
+      const playerTookDamage =
+        scene.playerHp < previousScene.playerHp ||
+        scene.playerShield < previousScene.playerShield;
+      const bossJustDefeated = scene.bossDefeated && !previousScene.bossDefeated;
+      const playerJustDied = scene.playerHp <= 0 && previousScene.playerHp > 0;
+
+      if (spawnedBoss) {
+        void playSoundSafely(bossPlayer, isSfxEnabledRef.current);
+      }
+
+      if (spawnedHostile) {
+        void playSoundSafely(wavePlayer, isSfxEnabledRef.current, true, false);
+      }
+
+      if (spawnedPulseBullet) {
+        void resetSoundSafely(firePlayer);
+        void playSoundSafely(pulsePlayer, isSfxEnabledRef.current);
+      }
+
+      if ((explosionSpawned || playerTookDamage) && !bossJustDefeated && !playerJustDied) {
+        void playSoundSafely(destroyPlayer, isSfxEnabledRef.current);
+      }
+    }
+
+    previousSceneSnapshotRef.current = scene;
+  }, [
+    applyShipOffset,
     bossPlayer,
     destroyPlayer,
     firePlayer,
+    gameState,
     maxShipOffset,
-    pulseChargeMs,
+    moveSpeedPxPerMs,
     pulsePlayer,
-    standardFireCooldownMs,
+    scene,
     wavePlayer,
   ]);
 
@@ -839,27 +1076,68 @@ export default function HomeScreen() {
       setLastRunScore(scene.score);
       setGameState("gameOver");
       setIsBoosting(false);
+      heldMoveDirectionRef.current = 0;
+      targetShipOffsetRef.current = shipOffsetRef.current;
       void resetSoundSafely(boostPlayer);
       void resetSoundSafely(pulsePlayer);
+      void playSoundSafely(playerDeathPlayer, isSfxEnabledRef.current);
     }
-  }, [boostPlayer, gameState, pulsePlayer, scene.playerHp, scene.score]);
+  }, [
+    boostPlayer,
+    gameState,
+    playerDeathPlayer,
+    pulsePlayer,
+    scene.playerHp,
+    scene.score,
+    setLastRunScore,
+  ]);
 
   useEffect(() => {
     if (gameState === "playing" && scene.bossDefeated) {
+      const nextClearance = getStageClearanceAfterClear(
+        stageClearance,
+        scene.stage,
+      );
+      const newlyUnlockedShips = getNewlyUnlockedHangarShips(
+        stageClearance,
+        nextClearance,
+      );
+
       setLastRunScore(scene.score);
+      setHighestClearedStage(nextClearance);
+      setStageClearAnnouncement(
+        newlyUnlockedShips.length > 0
+          ? newlyUnlockedShips.map((ship) => ship.name).join(", ")
+          : null,
+      );
       setIsBoosting(false);
       setIsFireHeld(false);
       isFireHeldRef.current = false;
+      heldMoveDirectionRef.current = 0;
+      targetShipOffsetRef.current = shipOffsetRef.current;
       pulseModeRef.current = false;
       fireHoldStartAtRef.current = 0;
       void resetSoundSafely(boostPlayer);
+      setScreenShakeMs(480);
+      void playSoundSafely(bossDestroyedPlayer, isSfxEnabledRef.current);
       setGameState("stageClear");
     }
-  }, [boostPlayer, gameState, scene.bossDefeated, scene.score]);
+  }, [
+    bossDestroyedPlayer,
+    boostPlayer,
+    gameState,
+    scene.bossDefeated,
+    scene.score,
+    scene.stage,
+    stageClearance,
+    setLastRunScore,
+    setHighestClearedStage,
+  ]);
 
-  const resetRunState = () => {
+  const resetRunState = useCallback(() => {
     setIsBoosting(false);
     setIsFireHeld(false);
+    setStageClearAnnouncement(null);
     setShipOffset(0);
     lastMoveAtRef.current = 0;
     lastMoveDirectionRef.current = 0;
@@ -873,14 +1151,18 @@ export default function HomeScreen() {
     nextEnemySpawnMsRef.current = 1200;
     bossSpawnedRef.current = false;
     isFireHeldRef.current = false;
+    heldMoveDirectionRef.current = 0;
     pulseModeRef.current = false;
     fireHoldStartAtRef.current = 0;
+    targetShipOffsetRef.current = 0;
+    setScreenShakeMs(0);
     setScene({
       elapsedMs: 0,
       travel: 0,
       score: 0,
-      playerHp: INITIAL_LIVES,
+      playerHp,
       playerShield: 0,
+      playerDamageFlashMs: 0,
       stage: BOSS_STAGE,
       stageKills: 0,
       bossDefeated: false,
@@ -888,13 +1170,65 @@ export default function HomeScreen() {
       enemies: [],
       bossLasers: [],
       explosions: [],
-      lives: INITIAL_LIVES,
+      lives: playerHp,
     });
-  };
+  }, [playerHp]);
+
+  useEffect(() => {
+    if (!isFocused) {
+      return;
+    }
+
+    refreshActiveShip();
+
+    const requestId = getMainMenuReturnRequestId();
+    if (
+      requestId === 0 ||
+      requestId === handledMainMenuReturnRequestRef.current
+    ) {
+      return;
+    }
+
+    handledMainMenuReturnRequestRef.current = requestId;
+    setLastRunScore(sceneRef.current.score);
+    setGameState("menu");
+    setMenuPanel("main");
+    setStageClearAnnouncement(null);
+    resetRunState();
+    void resetSoundSafely(boostPlayer);
+  }, [
+    boostPlayer,
+    isFocused,
+    playerHp,
+    refreshActiveShip,
+    resetRunState,
+    setLastRunScore,
+    shieldPoints,
+  ]);
 
   const startGame = () => {
     resetRunState();
     setGameState("playing");
+  };
+
+  const togglePause = () => {
+    if (gameState === "playing") {
+      setGameState("paused");
+      setIsBoosting(false);
+      setIsFireHeld(false);
+      isFireHeldRef.current = false;
+      pulseModeRef.current = false;
+      fireHoldStartAtRef.current = 0;
+      heldMoveDirectionRef.current = 0;
+      targetShipOffsetRef.current = shipOffsetRef.current;
+      void resetSoundSafely(boostPlayer);
+      void resetSoundSafely(pulsePlayer);
+      return;
+    }
+
+    if (gameState === "paused") {
+      setGameState("playing");
+    }
   };
 
   const continueToStageTwo = () => {
@@ -907,6 +1241,7 @@ export default function HomeScreen() {
       stage: 2,
       stageKills: 0,
       bossDefeated: false,
+      playerDamageFlashMs: 0,
       bullets: [],
       enemies: [],
       bossLasers: [],
@@ -916,9 +1251,12 @@ export default function HomeScreen() {
     nextEnemySpawnMsRef.current = 1100;
     bossSpawnedRef.current = false;
     isFireHeldRef.current = false;
+    heldMoveDirectionRef.current = 0;
     pulseModeRef.current = false;
     fireHoldStartAtRef.current = 0;
+    targetShipOffsetRef.current = shipOffsetRef.current;
     setIsFireHeld(false);
+    setStageClearAnnouncement(null);
     setGameState("playing");
   };
 
@@ -926,6 +1264,7 @@ export default function HomeScreen() {
     setLastRunScore(scene.score);
     setGameState("menu");
     setMenuPanel("main");
+    setStageClearAnnouncement(null);
     resetRunState();
     void resetSoundSafely(boostPlayer);
   };
@@ -934,6 +1273,7 @@ export default function HomeScreen() {
     setLastRunScore(scene.score);
     setGameState("menu");
     setMenuPanel("main");
+    setStageClearAnnouncement(null);
     resetRunState();
     void resetSoundSafely(boostPlayer);
   };
@@ -945,85 +1285,77 @@ export default function HomeScreen() {
 
     const currentScene = sceneRef.current;
     const cooldown =
-      kind === "pulse" ? pulseChargeMs : standardFireCooldownMs;
+      activeShipId === "helios" ? standardFireCooldownMs : kind === "pulse" ? pulseChargeMs : standardFireCooldownMs;
 
     if (currentScene.elapsedMs - lastFireAtRef.current < cooldown) {
-      return false;
-    }
-
-    if (currentScene.bullets.length >= MAX_ACTIVE_BULLETS) {
       return false;
     }
 
     const activePlayAreaHeight =
       playAreaHeightRef.current || Math.max(260, heightRef.current * 0.52);
     const currentShipLift = (boostRef.current ? -16 : 0) + shipLiftOffset;
-    const bulletHeight = getBulletHeight(kind);
-    const bulletStartY =
+    const muzzleOriginY =
       activePlayAreaHeight -
       PLAY_AREA_BOTTOM_PADDING -
       SHIP_FRAME_HEIGHT +
+      playerFlightBaseLift +
       SHIP_MUZZLE_OFFSET +
-      currentShipLift -
-      Math.max(0, bulletHeight - BULLET_HEIGHT) / 2;
+      currentShipLift;
+    const nextShots = buildShotsForAttack(
+      kind === "pulse" ? "alt" : "standard",
+      muzzleOriginY,
+      shipOffsetRef.current,
+    );
 
-    const newBullet: Bullet = {
-      id: bulletIdRef.current++,
-      x: shipOffsetRef.current,
-      y: bulletStartY,
-      kind,
-    };
+    if (
+      nextShots.length === 0 ||
+      currentScene.bullets.length + nextShots.length > MAX_ACTIVE_BULLETS
+    ) {
+      return false;
+    }
 
     lastFireAtRef.current = currentScene.elapsedMs;
 
     setScene((currentSceneState) => ({
       ...currentSceneState,
       bullets:
-        currentSceneState.bullets.length >= MAX_ACTIVE_BULLETS
+        currentSceneState.bullets.length + nextShots.length > MAX_ACTIVE_BULLETS
           ? currentSceneState.bullets
-          : [...currentSceneState.bullets, newBullet],
+          : [...currentSceneState.bullets, ...nextShots],
     }));
 
     return true;
   };
 
   const moveShipToOffset = (targetOffset: number) => {
-    if (gameStateRef.current !== "playing") {
+    if (gameStateRef.current !== "playing" || movementLockedWhileFiring) {
       return;
     }
 
-    let didMove = false;
-    let direction: 0 | -1 | 1 = 0;
-
-    setShipOffset((currentOffset) => {
-      const nextOffset = clamp(targetOffset, -maxShipOffset, maxShipOffset);
-      didMove = nextOffset !== currentOffset;
-      direction =
-        nextOffset === currentOffset ? 0 : nextOffset > currentOffset ? 1 : -1;
-      return nextOffset;
-    });
-
-    if (
-      didMove &&
-      sceneRef.current.elapsedMs - lastMoveSoundAtRef.current >
-        MOVE_SOUND_COOLDOWN_MS
-    ) {
-      lastMoveAtRef.current = sceneRef.current.elapsedMs;
-      lastMoveDirectionRef.current = direction;
-      lastMoveSoundAtRef.current = sceneRef.current.elapsedMs;
-    void playSoundSafely(movePlayer, isSfxEnabledRef.current);
-    } else if (didMove) {
-      lastMoveAtRef.current = sceneRef.current.elapsedMs;
-      lastMoveDirectionRef.current = direction;
-    }
+    heldMoveDirectionRef.current = 0;
+    targetShipOffsetRef.current = clamp(targetOffset, -maxShipOffset, maxShipOffset);
   };
 
-  const moveShip = (direction: -1 | 1) => {
-    moveShipToOffset(shipOffsetRef.current + direction * moveStep);
+  const handleMoveStart = (direction: -1 | 1) => {
+    if (gameStateRef.current !== "playing" || movementLockedWhileFiring) {
+      return;
+    }
+
+    heldMoveDirectionRef.current = direction;
+    targetShipOffsetRef.current = shipOffsetRef.current;
+  };
+
+  const handleMoveEnd = (direction: -1 | 1) => {
+    if (heldMoveDirectionRef.current !== direction) {
+      return;
+    }
+
+    heldMoveDirectionRef.current = 0;
+    targetShipOffsetRef.current = shipOffsetRef.current;
   };
 
   const handleTouchMoveShip = (event: GestureResponderEvent) => {
-    if (gameStateRef.current !== "playing") {
+    if (gameStateRef.current !== "playing" || movementLockedWhileFiring) {
       return;
     }
 
@@ -1040,7 +1372,7 @@ export default function HomeScreen() {
     fireHoldStartAtRef.current = sceneRef.current.elapsedMs;
     setIsFireHeld(true);
 
-    if (spawnPlayerShot("standard")) {
+    if (activeShipId !== "helios" && spawnPlayerShot("standard")) {
       void playSoundSafely(firePlayer, isSfxEnabledRef.current);
     }
   };
@@ -1085,17 +1417,126 @@ export default function HomeScreen() {
     0,
     1 - (scene.elapsedMs - lastMoveAtRef.current) / 220,
   );
-  const shipBank =
-    lastMoveDirectionRef.current * bankProgress * 9 * shipBankMultiplier;
+  const shipBank = lastMoveDirectionRef.current
+    ? Math.max(
+        -15,
+        Math.min(
+          15,
+          lastMoveDirectionRef.current *
+            Math.pow(bankProgress, 0.72) *
+            13 *
+            shipBankMultiplier,
+        ),
+      )
+    : 0;
+  const shipLift = playerFlightBaseLift + (isBoosting ? -16 : 0) + shipLiftOffset;
   const motionIntensity = isBoosting ? 1 : isManeuvering ? 0.45 : 0.14;
-  const shipLift = (isBoosting ? -16 : 0) + shipLiftOffset;
   const travelAmount = gameState === "playing" ? scene.travel : 0;
-  const scoreDisplay = String(scene.score).padStart(4, "0");
   const highScoreDisplay = String(highScore).padStart(4, "0");
   const lastRunDisplay = String(lastRunScore).padStart(4, "0");
+  const shieldUnlocked =
+    scene.stage > BOSS_STAGE || gameState === "stageClear" || scene.playerShield > 0;
+  const visibleShieldPoints = shieldUnlocked ? shieldPoints : 0;
+  const shakeStrength = Math.min(14, screenShakeMs / 26);
+  const shakeOffsetX =
+    screenShakeMs > 0 ? Math.sin(screenShakeMs * 0.2) * shakeStrength : 0;
+  const shakeOffsetY =
+    screenShakeMs > 0 ? Math.cos(screenShakeMs * 0.32) * (shakeStrength * 0.65) : 0;
+  const getBulletShellVariant = (bullet: Bullet) => {
+    switch (bullet.kind) {
+      case "missile":
+        return {
+          backgroundColor: "#86FFD1",
+          shadowColor: "#86FFD1",
+          shadowRadius: 12,
+        };
+      case "needle":
+        return {
+          backgroundColor: "#B9FFAF",
+          shadowColor: "#C8FFB4",
+          shadowRadius: 8,
+        };
+      case "electricOrb":
+        return {
+          backgroundColor: "#8CB2FF",
+          shadowColor: "#B8C8FF",
+          shadowRadius: 14,
+        };
+      case "beam":
+        return {
+          backgroundColor: "rgba(255, 191, 102, 0.58)",
+          shadowColor: "#FFD37C",
+          shadowRadius: 16,
+          opacity: 0.92,
+        };
+      case "plasmaPellet":
+        return {
+          backgroundColor: "#D4A1FF",
+          shadowColor: "#E0B9FF",
+          shadowRadius: 10,
+        };
+      case "seekerPod":
+        return {
+          backgroundColor: "#FF9F8C",
+          shadowColor: "#FFB5AA",
+          shadowRadius: 12,
+        };
+      case "novaPulse":
+        return {
+          backgroundColor: "#7BEAFF",
+          shadowColor: "#C2FBFF",
+          shadowRadius: 12,
+        };
+      case "pulse":
+        return {
+          backgroundColor: "#82B9FF",
+          shadowColor: "#9FD5FF",
+          shadowRadius: 14,
+        };
+      case "standard":
+      default:
+        return null;
+    }
+  };
+  const getBulletCoreVariant = (bullet: Bullet) => {
+    switch (bullet.kind) {
+      case "missile":
+        return { width: 4, backgroundColor: "#FFF8D9" };
+      case "needle":
+        return { width: 2, backgroundColor: "#F6FFF3" };
+      case "electricOrb":
+        return { width: getBulletWidth(bullet.kind) - 6, backgroundColor: "#F1F6FF" };
+      case "beam":
+        return { width: 6, backgroundColor: "#FFF8E8", opacity: 0.96 };
+      case "plasmaPellet":
+        return { width: getBulletWidth(bullet.kind) - 5, backgroundColor: "#FFF2FF" };
+      case "seekerPod":
+        return { width: 6, backgroundColor: "#FFF1E8" };
+      case "novaPulse":
+        return { width: 3, backgroundColor: "#FEFFFF" };
+      case "pulse":
+        return { width: 12, backgroundColor: "#EAF5FF", opacity: 0.92 };
+      case "standard":
+      default:
+        return null;
+    }
+  };
 
   return (
-    <View style={styles.screen}>
+    <View
+      style={[
+        styles.screen,
+        gameState === "menu" ? styles.screenMenu : styles.screenInGame,
+        screenShakeMs > 0
+          ? {
+              transform: [
+                { translateX: shakeOffsetX },
+                { translateY: shakeOffsetY },
+              ],
+            }
+          : null,
+      ]}
+    >
       <View style={styles.spaceLayer} pointerEvents="none">
         <View style={styles.deepSpaceVignette} />
         <View style={styles.infiniteVoid} />
@@ -1356,265 +1797,28 @@ export default function HomeScreen() {
       </View>
 
       {gameState === "menu" ? (
-        <View style={styles.menuScreen}>
-          <View style={styles.menuDecorPlanetLarge} />
-          <View style={styles.menuDecorPlanetRing} />
-          <View style={styles.menuDecorPlanetSmall} />
-          <View style={styles.menuDecorNebulaA} />
-          <View style={styles.menuDecorNebulaB} />
-          <View style={styles.menuDecorAsteroidA} />
-          <View style={styles.menuDecorAsteroidB} />
-          <View style={styles.menuDecorAsteroidC} />
-
-          {menuPanel === "main" ? (
-            <>
-              <View style={styles.menuHeader}>
-                <Text style={styles.menuEyebrow}>ARCADE FLIGHT SYSTEM</Text>
-                <Text style={styles.menuTitle}>VOXIUM</Text>
-                <Text style={styles.menuTitle}>INVADERS</Text>
-                <Text style={styles.menuBlurb}>
-                  Pilot the rebel striker through deep-space assault lanes.
-                </Text>
-              </View>
-
-              <View style={styles.menuActions}>
-                <Pressable
-                  style={styles.menuStartButton}
-                  onPress={startGame}
-                  android_disableSound
-                >
-                  <Text style={styles.menuStartButtonText}>START GAME</Text>
-                </Pressable>
-                <Pressable
-                  style={styles.menuSecondaryButton}
-                  onPress={() => setMenuPanel("options")}
-                  android_disableSound
-                >
-                  <Text style={styles.menuSecondaryButtonText}>OPTIONS</Text>
-                </Pressable>
-                <Pressable
-                  style={styles.menuSecondaryButton}
-                  onPress={() => setMenuPanel("hangar")}
-                  android_disableSound
-                >
-                  <Text style={styles.menuSecondaryButtonText}>
-                    SHIP HANGAR
-                  </Text>
-                </Pressable>
-                <Pressable
-                  style={styles.menuSecondaryButton}
-                  onPress={() => setMenuPanel("credits")}
-                  android_disableSound
-                >
-                  <Text style={styles.menuSecondaryButtonText}>CREDITS</Text>
-                </Pressable>
-                <Pressable
-                  style={styles.menuSecondaryButton}
-                  onPress={() => setMenuPanel("records")}
-                  android_disableSound
-                >
-                  <Text style={styles.menuSecondaryButtonText}>HIGH SCORE</Text>
-                </Pressable>
-              </View>
-
-              <View style={styles.menuShipStage}>
-                <HeroShip
-                  bankAngle={-4}
-                  isBoosting={false}
-                  scale={1.08}
-                  decorative
-                  styles={styles}
-                />
-              </View>
-            </>
-          ) : menuPanel === "options" ? (
-            <View style={styles.menuPanel}>
-              <Text style={styles.menuPanelTitle}>OPTIONS</Text>
-              <Pressable
-                style={styles.menuSecondaryButton}
-                onPress={() => setIsMusicEnabled((current) => !current)}
-                android_disableSound
-              >
-                <Text style={styles.menuSecondaryButtonText}>
-                  MUSIC: {isMusicEnabled ? "ON" : "OFF"}
-                </Text>
-              </Pressable>
-              <Pressable
-                style={styles.menuSecondaryButton}
-                onPress={() => setIsSfxEnabled((current) => !current)}
-                android_disableSound
-              >
-                <Text style={styles.menuSecondaryButtonText}>
-                  SOUND EFFECTS: {isSfxEnabled ? "ON" : "OFF"}
-                </Text>
-              </Pressable>
-              <Pressable
-                style={styles.menuSecondaryButton}
-                onPress={toggleControlLayout}
-                android_disableSound
-              >
-                <Text style={styles.menuSecondaryButtonText}>
-                  CONTROL LAYOUT:{" "}
-                  {controlLayout === "classic" ? "CLASSIC" : "SPLIT"}
-                </Text>
-              </Pressable>
-              <Pressable
-                style={styles.menuBackButton}
-                onPress={() => setMenuPanel("main")}
-                android_disableSound
-              >
-                <Text style={styles.menuBackButtonText}>BACK</Text>
-              </Pressable>
-            </View>
-          ) : menuPanel === "hangar" ? (
-            <View style={styles.menuPanel}>
-              <Text style={styles.menuPanelTitle}>SHIP HANGAR</Text>
-              <Text style={styles.menuPanelBody}>
-                {unlockedHangarShips.length} FRAMES READY IN BAY
-              </Text>
-              <View style={styles.menuHangarPreview}>
-                {unlockedHangarShips.slice(0, 2).map((ship) => (
-                  <View
-                    key={ship.id}
-                    style={[
-                      styles.menuHangarShipCard,
-                      { borderColor: ship.accent },
-                    ]}
-                  >
-                    <Text style={styles.menuHangarShipName}>{ship.name}</Text>
-                    <Text style={styles.menuHangarShipWeapon}>
-                      {ship.weapon}
-                    </Text>
-                  </View>
-                ))}
-              </View>
-              {nextUnlockShip ? (
-                <Text style={styles.menuHangarHint}>
-                  NEXT UNLOCK: {nextUnlockShip.name} AT STAGE{" "}
-                  {nextUnlockShip.unlockStage}
-                </Text>
-              ) : null}
-              <Pressable
-                style={styles.menuStartButton}
-                onPress={() => router.push("/hangar")}
-                android_disableSound
-              >
-                <Text style={styles.menuStartButtonText}>OPEN HANGAR BAY</Text>
-              </Pressable>
-              <Pressable
-                style={styles.menuBackButton}
-                onPress={() => setMenuPanel("main")}
-                android_disableSound
-              >
-                <Text style={styles.menuBackButtonText}>BACK</Text>
-              </Pressable>
-            </View>
-          ) : menuPanel === "records" ? (
-            <View style={styles.menuPanel}>
-              <Text style={styles.menuPanelTitle}>HIGH SCORE</Text>
-              <Text style={styles.menuPanelBody}>BEST RUN {highScoreDisplay}</Text>
-              <Text style={styles.menuPanelBody}>LAST RUN {lastRunDisplay}</Text>
-              <Pressable
-                style={styles.menuBackButton}
-                onPress={() => setMenuPanel("main")}
-                android_disableSound
-              >
-                <Text style={styles.menuBackButtonText}>BACK</Text>
-              </Pressable>
-            </View>
-          ) : (
-            <View style={styles.menuPanel}>
-              <Text style={styles.menuPanelTitle}>CREDITS</Text>
-              <ScrollView
-                style={styles.creditsScroll}
-                contentContainerStyle={styles.creditsScrollContent}
-                showsVerticalScrollIndicator={false}
-              >
-                <View style={styles.creditsBlockCard}>
-                  <Text style={styles.creditsBlockText}>
-                    {CREDITS_BLOCK_TEXT}
-                  </Text>
-                </View>
-              </ScrollView>
-              <Pressable
-                style={styles.menuBackButton}
-                onPress={() => setMenuPanel("main")}
-                android_disableSound
-              >
-                <Text style={styles.menuBackButtonText}>BACK</Text>
-              </Pressable>
-            </View>
-          )}
-          <Text style={styles.versionFooter}>v{appVersion}</Text>
-        </View>
+        <GameMenu
+          appVersion={appVersion}
+          activeShipModelKey={shipProfile.ship.modelKey}
+          controlLayout={controlLayout}
+          highScoreDisplay={highScoreDisplay}
+          isMusicEnabled={isMusicEnabled}
+          isSfxEnabled={isSfxEnabled}
+          lastRunDisplay={lastRunDisplay}
+          menuPanel={menuPanel}
+          nextUnlockShip={nextUnlockShip}
+          stageClearance={stageClearance}
+          onOpenHangar={() => router.push("/hangar")}
+          onStartGame={startGame}
+          setIsMusicEnabled={setIsMusicEnabled}
+          setIsSfxEnabled={setIsSfxEnabled}
+          setMenuPanel={setMenuPanel}
+          styles={styles}
+          toggleControlLayout={toggleControlLayout}
+          unlockedHangarShips={unlockedHangarShips}
+        />
       ) : (
         <>
-          <View style={styles.hud}>
-            <View style={styles.hudBlock}>
-              <Text style={styles.hudText}>SCORE {scoreDisplay}</Text>
-              <Text style={styles.hudSubtext}>HI {highScoreDisplay}</Text>
-            </View>
-            <View style={styles.hudBlockRight}>
-              <Text style={styles.hudText}>STAGE {scene.stage}</Text>
-              <Text style={styles.hudSubtext}>
-                {getStageHudSubtitle(scene.stage)}
-              </Text>
-            </View>
-          </View>
-
-          <View style={styles.statusMeters}>
-            <View style={styles.statusMeter}>
-              <Text style={styles.statusMeterLabel}>HULL</Text>
-              <View style={styles.statusBarRow}>
-                {Array.from({ length: INITIAL_LIVES }, (_, index) => (
-                  <View
-                    key={`hp-${index}`}
-                    style={[
-                      styles.statusBar,
-                      styles.healthBar,
-                      index < scene.playerHp
-                        ? styles.healthBarActive
-                        : styles.statusBarEmpty,
-                    ]}
-                  />
-                ))}
-              </View>
-            </View>
-
-            <View style={styles.statusMeter}>
-              <Text style={styles.statusMeterLabel}>SHIELD</Text>
-              <View style={styles.statusBarRow}>
-                {Array.from({ length: MAX_SHIELD_POINTS }, (_, index) => (
-                  <View
-                    key={`shield-${index}`}
-                    style={[
-                      styles.statusBar,
-                      styles.shieldBar,
-                      index < scene.playerShield
-                        ? styles.shieldBarActive
-                        : styles.statusBarEmpty,
-                    ]}
-                  />
-                ))}
-              </View>
-            </View>
-          </View>
-
-          <View style={styles.titleWrap}>
-            <Text style={styles.title}>VOXIUM INVADERS</Text>
-            <Text style={styles.subtitle}>
-              {gameState === "gameOver" ? "SIGNAL LOST" : "FLIGHT VECTOR ENGAGED"}
-            </Text>
-          </View>
-
-          <Pressable
-            style={styles.menuReturnButton}
-            onPress={returnToMenu}
-            android_disableSound
-          >
-            <Text style={styles.menuReturnButtonText}>MENU</Text>
-          </Pressable>
-
           <View style={styles.playArea} onLayout={handlePlayAreaLayout}>
             <View
               style={styles.touchFlightZone}
@@ -1696,6 +1900,7 @@ export default function HomeScreen() {
                   style={[
                     styles.bulletShell,
                     bullet.kind === "pulse" && styles.pulseBulletShell,
+                    getBulletShellVariant(bullet),
                     {
                       left:
                         contentWidth / 2 +
@@ -1704,6 +1909,13 @@ export default function HomeScreen() {
                       top: bullet.y,
                       width: getBulletWidth(bullet.kind),
                       height: getBulletHeight(bullet.kind),
+                      transform:
+                        bullet.kind === "missile" ||
+                        bullet.kind === "needle" ||
+                        bullet.kind === "plasmaPellet" ||
+                        bullet.kind === "seekerPod"
+                          ? [{ rotate: `${(bullet.vx ?? 0) * 160}deg` }]
+                          : undefined,
                     },
                   ]}
                 >
@@ -1711,6 +1923,7 @@ export default function HomeScreen() {
                     style={[
                       styles.bulletCore,
                       bullet.kind === "pulse" && styles.pulseBulletCore,
+                      getBulletCoreVariant(bullet),
                       {
                         height: getBulletHeight(bullet.kind) - 6,
                       },
@@ -1760,178 +1973,92 @@ export default function HomeScreen() {
             <HeroShip
               bankAngle={shipBank}
               isBoosting={isBoosting}
+              modelKey={shipProfile.ship.modelKey}
               shipOffset={shipOffset}
               shipLift={shipLift}
               scale={shipScale}
+              damageFlashMs={scene.playerDamageFlashMs}
               styles={styles}
             />
 
+            {scene.playerDamageFlashMs > 0 ? (
+              <View
+                pointerEvents="none"
+                style={[
+                  styles.playerDamageOverlay,
+                  {
+                    opacity: Math.min(0.24, scene.playerDamageFlashMs / 240 / 3),
+                  },
+                ]}
+              />
+            ) : null}
+
             {gameState === "gameOver" && (
-              <View style={styles.gameOverOverlay}>
-                <Text style={styles.gameOverTitle}>GAME OVER</Text>
-                <Text style={styles.gameOverText}>
-                  The invaders broke through your flight lane.
-                </Text>
-                <Pressable
-                  style={styles.gameOverPrimaryButton}
-                  onPress={startGame}
-                  android_disableSound
-                >
-                  <Text style={styles.gameOverPrimaryButtonText}>RESTART</Text>
-                </Pressable>
-                <Pressable
-                  style={styles.gameOverSecondaryButton}
-                  onPress={returnToMenu}
-                  android_disableSound
-                >
-                  <Text style={styles.gameOverSecondaryButtonText}>
-                    MAIN MENU
-                  </Text>
-                </Pressable>
-              </View>
+              <GameOverScreen
+                onRestart={startGame}
+                onReturnToMenu={returnToMenu}
+                styles={styles}
+              />
             )}
 
             {gameState === "stageClear" && (
-              <View style={styles.gameOverOverlay}>
-                <Text style={styles.gameOverTitle}>
-                  {getStageClearTitle(scene.stage)}
-                </Text>
-                <Text style={styles.gameOverText}>
-                  {getStageClearMessage(scene.stage)}
-                </Text>
-                {scene.stage === 1 ? (
-                  <>
-                    <Pressable
-                      style={styles.gameOverPrimaryButton}
-                      onPress={continueToStageTwo}
-                      android_disableSound
-                    >
-                      <Text style={styles.gameOverPrimaryButtonText}>
-                        {getStageClearPrimaryLabel(scene.stage)}
-                      </Text>
-                    </Pressable>
-                    <Pressable
-                      style={styles.gameOverSecondaryButton}
-                      onPress={returnToMenuFromStageClear}
-                      android_disableSound
-                    >
-                      <Text style={styles.gameOverSecondaryButtonText}>
-                        {getStageClearSecondaryLabel(scene.stage)}
-                      </Text>
-                    </Pressable>
-                  </>
-                ) : (
-                  <>
-                    <Pressable
-                      style={styles.gameOverPrimaryButton}
-                      onPress={returnToMenuFromStageClear}
-                      android_disableSound
-                    >
-                      <Text style={styles.gameOverPrimaryButtonText}>
-                        {getStageClearPrimaryLabel(scene.stage)}
-                      </Text>
-                    </Pressable>
-                    <Pressable
-                      style={styles.gameOverSecondaryButton}
-                      onPress={startGame}
-                      android_disableSound
-                    >
-                      <Text style={styles.gameOverSecondaryButtonText}>
-                        {getStageClearSecondaryLabel(scene.stage)}
-                      </Text>
-                    </Pressable>
-                  </>
-                )}
-              </View>
+              <StageClearScreen
+                onContinue={continueToStageTwo}
+                onRestart={startGame}
+                onReturnToMenu={returnToMenuFromStageClear}
+                unlockAnnouncement={stageClearAnnouncement}
+                stage={scene.stage}
+                styles={styles}
+              />
             )}
           </View>
 
+          <GameHUD
+            gameState={gameState}
+            playerHpMax={playerHp}
+            playerShieldMax={visibleShieldPoints}
+            highScoreDisplay={highScoreDisplay}
+            onTogglePause={togglePause}
+            onReturnToMenu={returnToMenu}
+            scene={scene}
+            styles={styles}
+          />
+
           {gameState === "playing" && (
-            <View
-              style={[
-                styles.controlsDock,
-                controlLayout === "split" && styles.controlsDockSplit,
-              ]}
-            >
+            <GameControls
+              controlLayout={controlLayout}
+              isBoosting={isBoosting}
+              isFireHeld={isFireHeld}
+              onMoveStart={handleMoveStart}
+              onMoveEnd={handleMoveEnd}
+              onBoostStart={handleBoostStart}
+              onBoostEnd={handleBoostEnd}
+              onFirePressIn={handleFirePressIn}
+              onFirePressOut={handleFirePressOut}
+              styles={styles}
+            />
+          )}
+
+          {gameState === "paused" && (
+            <View style={styles.pauseOverlay}>
+              <Text style={styles.pauseTitle}>PAUSED</Text>
+              <Text style={styles.pauseText}>
+                Systems holding position. Resume when you are ready.
+              </Text>
               <Pressable
-                style={[
-                  styles.boostControl,
-                  isBoosting && styles.boostControlActive,
-                ]}
-                onPressIn={handleBoostStart}
-                onPressOut={handleBoostEnd}
-                onPress={() => {}}
+                style={styles.gameOverPrimaryButton}
+                onPress={togglePause}
                 android_disableSound
               >
-                <Text style={styles.boostLabel}>BOOST</Text>
-                <View style={styles.boostMeter}>
-                  <View
-                    style={[
-                      styles.boostMeterFill,
-                      isBoosting && styles.boostMeterFillActive,
-                    ]}
-                  />
-                </View>
+                <Text style={styles.gameOverPrimaryButtonText}>RESUME</Text>
               </Pressable>
-
-              <View
-                style={[
-                  styles.primaryControls,
-                  controlLayout === "split" && styles.primaryControlsSplit,
-                ]}
+              <Pressable
+                style={styles.gameOverSecondaryButton}
+                onPress={returnToMenu}
+                android_disableSound
               >
-                <View style={styles.joystickCluster}>
-                  <Text style={styles.swipeHintText}>
-                    SWIPE SCREEN TO MOVE LEFT AND RIGHT
-                  </Text>
-                  <View style={styles.joystickBase}>
-                    <Pressable
-                      style={[styles.joystickButton, styles.joystickButtonLeft]}
-                      onPress={() => moveShip(-1)}
-                      android_disableSound
-                    >
-                      <MaterialIcons
-                        name="chevron-left"
-                        size={28}
-                        color="#F3FAFF"
-                      />
-                    </Pressable>
-                    <View style={styles.joystickCenterRail} />
-                    <Pressable
-                      style={[
-                        styles.joystickButton,
-                        styles.joystickButtonRight,
-                      ]}
-                      onPress={() => moveShip(1)}
-                      android_disableSound
-                    >
-                      <MaterialIcons
-                        name="chevron-right"
-                        size={28}
-                        color="#F3FAFF"
-                      />
-                    </Pressable>
-                  </View>
-                </View>
-
-                <View style={styles.fireCluster}>
-                  <Text style={styles.fireHintText}>HOLD FOR ALT ATTACK</Text>
-                  <Pressable
-                    style={[
-                      styles.fireButton,
-                      isFireHeld && styles.fireButtonActive,
-                    ]}
-                    onPressIn={handleFirePressIn}
-                    onPressOut={handleFirePressOut}
-                    onPress={() => {}}
-                    android_disableSound
-                  >
-                    <Text style={styles.fireButtonText}>
-                      {isFireHeld ? "PULSE" : "FIRE"}
-                    </Text>
-                  </Pressable>
-                </View>
-              </View>
+                <Text style={styles.gameOverSecondaryButtonText}>MAIN MENU</Text>
+              </Pressable>
             </View>
           )}
         </>
@@ -1944,10 +2071,15 @@ const styles = StyleSheet.create({
   screen: {
     flex: 1,
     backgroundColor: "#000000",
+    overflow: "hidden",
+  },
+  screenMenu: {
     paddingTop: SCREEN_TOP_PADDING,
     paddingHorizontal: SCREEN_HORIZONTAL_PADDING,
     paddingBottom: SCREEN_BOTTOM_PADDING,
-    overflow: "hidden",
+  },
+  screenInGame: {
+    paddingHorizontal: SCREEN_HORIZONTAL_PADDING,
   },
   spaceLayer: {
     ...StyleSheet.absoluteFillObject,
@@ -2311,12 +2443,18 @@ const styles = StyleSheet.create({
     transform: [{ rotate: "14deg" }],
     opacity: 0.8,
   },
+  hudOverlay: {
+    position: "absolute",
+    top: SCREEN_TOP_PADDING,
+    left: SCREEN_HORIZONTAL_PADDING,
+    right: SCREEN_HORIZONTAL_PADDING,
+    zIndex: 6,
+  },
   hud: {
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "center",
     marginBottom: 6,
-    zIndex: 2,
   },
   hudBlock: {
     gap: 3,
@@ -2343,6 +2481,51 @@ const styles = StyleSheet.create({
     gap: 8,
     marginBottom: 10,
     zIndex: 2,
+  },
+  bossMeterSection: {
+    borderWidth: 1,
+    borderColor: "rgba(255, 201, 108, 0.26)",
+    backgroundColor: "rgba(24, 16, 7, 0.7)",
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    marginBottom: 10,
+  },
+  bossMeterHeader: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    marginBottom: 6,
+  },
+  bossMeterLabel: {
+    color: "#FFD991",
+    fontSize: 9,
+    fontWeight: "900",
+    letterSpacing: 1.3,
+  },
+  bossMeterValue: {
+    color: "#FFE8BF",
+    fontSize: 10,
+    fontWeight: "800",
+    letterSpacing: 0.8,
+  },
+  bossMeterTrack: {
+    flexDirection: "row",
+    gap: 3,
+  },
+  bossMeterSegment: {
+    flex: 1,
+    height: 8,
+    borderRadius: 4,
+    borderWidth: 1,
+  },
+  bossMeterSegmentActive: {
+    backgroundColor: "#FFB94A",
+    borderColor: "#FFD28A",
+  },
+  bossMeterSegmentEmpty: {
+    borderColor: "rgba(255, 208, 138, 0.12)",
+    backgroundColor: "rgba(34, 20, 8, 0.28)",
+    opacity: 0.45,
   },
   statusMeter: {
     flex: 1,
@@ -2391,7 +2574,6 @@ const styles = StyleSheet.create({
   titleWrap: {
     alignItems: "center",
     marginBottom: 10,
-    zIndex: 2,
   },
   title: {
     color: "#F2F7FF",
@@ -2407,6 +2589,11 @@ const styles = StyleSheet.create({
     letterSpacing: 1.5,
     marginTop: 4,
   },
+  hudActions: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+  },
   menuReturnButton: {
     alignSelf: "flex-start",
     borderWidth: 1,
@@ -2415,7 +2602,6 @@ const styles = StyleSheet.create({
     paddingVertical: 4,
     paddingHorizontal: 10,
     marginBottom: 6,
-    zIndex: 2,
   },
   menuReturnButtonText: {
     color: "#DCE9F7",
@@ -2430,12 +2616,41 @@ const styles = StyleSheet.create({
     paddingBottom: PLAY_AREA_BOTTOM_PADDING,
     zIndex: 2,
   },
+  playerDamageOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: "rgba(255, 58, 82, 0.18)",
+    zIndex: 3,
+  },
+  pauseOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "rgba(4, 8, 16, 0.74)",
+    paddingHorizontal: 28,
+    zIndex: 5,
+  },
+  pauseTitle: {
+    color: "#EDF6FF",
+    fontSize: 30,
+    fontWeight: "900",
+    letterSpacing: 2.6,
+    textAlign: "center",
+  },
+  pauseText: {
+    color: "#C6D8EC",
+    fontSize: 14,
+    fontWeight: "600",
+    textAlign: "center",
+    lineHeight: 20,
+    marginTop: 12,
+    marginBottom: 22,
+  },
   touchFlightZone: {
     position: "absolute",
     left: 0,
     right: 0,
+    top: 0,
     bottom: 0,
-    height: TOUCH_CONTROL_HEIGHT,
     zIndex: 1,
   },
   enemyLayer: {
@@ -2457,6 +2672,14 @@ const styles = StyleSheet.create({
     height: 22,
     alignItems: "center",
     justifyContent: "center",
+  },
+  enemyHitFlash: {
+    position: "absolute",
+    left: 0,
+    top: 0,
+    width: "100%",
+    height: "100%",
+    borderRadius: 28,
   },
   enemyGlowBoss: {
     opacity: 0.9,
@@ -2868,6 +3091,18 @@ const styles = StyleSheet.create({
   },
   playerShipShadowDecorative: {
     opacity: 0.82,
+  },
+  playerShipDamageFlash: {
+    position: "absolute",
+    bottom: 20,
+    width: 114,
+    height: 86,
+    borderRadius: 999,
+    backgroundColor: "rgba(255, 88, 102, 0.38)",
+    shadowColor: "#FF6F7E",
+    shadowOpacity: 0.85,
+    shadowRadius: 18,
+    elevation: 8,
   },
   playerShipSvgImage: {
     width: SHIP_FRAME_WIDTH - 40,
@@ -3772,6 +4007,29 @@ const styles = StyleSheet.create({
     marginTop: 12,
     marginBottom: 22,
   },
+  stageClearUnlockBanner: {
+    width: "100%",
+    borderWidth: 1,
+    borderColor: "rgba(127, 240, 201, 0.34)",
+    backgroundColor: "rgba(14, 42, 34, 0.92)",
+    borderRadius: 16,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    marginBottom: 18,
+    gap: 4,
+  },
+  stageClearUnlockEyebrow: {
+    color: "#A8F5D1",
+    fontSize: 10,
+    fontWeight: "900",
+    letterSpacing: 1.8,
+  },
+  stageClearUnlockText: {
+    color: "#F1FFF8",
+    fontSize: 14,
+    lineHeight: 20,
+    fontWeight: "800",
+  },
   gameOverPrimaryButton: {
     width: "100%",
     borderWidth: 2,
@@ -3802,11 +4060,15 @@ const styles = StyleSheet.create({
     letterSpacing: 1.5,
   },
   controlsDock: {
+    position: "absolute",
+    left: SCREEN_HORIZONTAL_PADDING,
+    right: SCREEN_HORIZONTAL_PADDING,
+    bottom: SCREEN_BOTTOM_PADDING,
     flexDirection: "row",
     alignItems: "flex-end",
     justifyContent: "space-between",
     gap: 8,
-    zIndex: 3,
+    zIndex: 7,
   },
   controlsDockSplit: {
     flexDirection: "column",

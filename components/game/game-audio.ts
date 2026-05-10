@@ -16,6 +16,7 @@ export async function playSoundSafely(
   player: AudioPlayer,
   isSfxEnabled: boolean,
   respectSfxSetting = true,
+  restartFromBeginning = true,
 ) {
   if (respectSfxSetting && !isSfxEnabled) {
     return;
@@ -23,12 +24,18 @@ export async function playSoundSafely(
 
   await runSerialized(player, async () => {
     try {
-      player.pause();
-      await player.seekTo(0);
+      if (restartFromBeginning) {
+        await player.seekTo(0);
+      } else if (player.playing) {
+        return;
+      }
     } catch {
       try {
-        player.pause();
-        await player.seekTo(0);
+        if (restartFromBeginning) {
+          await player.seekTo(0);
+        } else if (player.playing) {
+          return;
+        }
       } catch {}
     }
 
